@@ -10,7 +10,7 @@ HERO_TYPES = {
     "TANK": {"health": 200, "speed": 2, "build_speed": 0.8},
     "BUILDER": {"health": 100, "speed": 3, "build_speed": 2.0},
     "ARCHER": {"health": 80, "speed": 4, "build_speed": 0.5},
-    "MAGE": {"health": 60, "speed": 3, "build_speed": 1.0}
+    "MAGE": {"health": 60, "speed": 3, "build_speed": 1.0},
 }
 
 BUILDING_TYPES = {
@@ -23,7 +23,11 @@ BUILDING_TYPES = {
     "GOLD_MINE": {"health": 120, "cost": {"wood": 30, "stone": 20}, "size": (2, 2)},
     "BARRACKS": {"health": 150, "cost": {"wood": 40, "stone": 30}, "size": (3, 2)},
     "ARCHERY_RANGE": {"health": 120, "cost": {"wood": 35, "stone": 25}, "size": (3, 2)},
-    "CANNON_FOUNDRY": {"health": 200, "cost": {"wood": 50, "stone": 40, "metal": 20}, "size": (3, 3)}
+    "CANNON_FOUNDRY": {
+        "health": 200,
+        "cost": {"wood": 50, "stone": 40, "metal": 20},
+        "size": (3, 3),
+    },
 }
 
 RESOURCE_TYPES = ["wood", "stone", "wheat", "metal", "gold"]
@@ -31,7 +35,7 @@ RESOURCE_TYPES = ["wood", "stone", "wheat", "metal", "gold"]
 UNIT_TYPES = {
     "SOLDIER": {"health": 60, "speed": 3, "cost": {"wheat": 2, "metal": 1}},
     "ARCHER": {"health": 40, "speed": 4, "cost": {"wheat": 1, "wood": 2}},
-    "CANNON": {"health": 80, "speed": 2, "cost": {"wheat": 3, "metal": 3, "gold": 1}}
+    "CANNON": {"health": 80, "speed": 2, "cost": {"wheat": 3, "metal": 3, "gold": 1}},
 }
 
 COLORS = {
@@ -46,13 +50,18 @@ COLORS = {
     "YELLOW": (255, 255, 0),
     "DARK_GREEN": (0, 100, 0),
     "PURPLE": (128, 0, 128),
-    "CYAN": (0, 255, 255)
+    "CYAN": (0, 255, 255),
 }
 
 FOG_COLOR = (50, 50, 50, 180)
 VISION_RADIUS = 5
 
 WAVE_SPAWN_INTERVAL = 120
-ENEMY_SPAWN_CORNERS = [(0, 0), (MAP_WIDTH-1, 0), (0, MAP_HEIGHT-1), (MAP_WIDTH-1, MAP_HEIGHT-1)]
+ENEMY_SPAWN_CORNERS = [
+    (0, 0),
+    (MAP_WIDTH - 1, 0),
+    (0, MAP_HEIGHT - 1),
+    (MAP_WIDTH - 1, MAP_HEIGHT - 1),
+]
 
 RESOURCE_TICK_RATE = 2.0

@@ -1,7 +1,8 @@
-import pygame
 import asyncio
 import logging
-from typing import Optional
+
+import pygame
+
 from client.utils.network_manager import NetworkManager
 from shared.constants.game_constants import COLORS
 
@@ -55,13 +56,17 @@ class MenuScene:
     def handle_event(self, event: pygame.event.Event):
         if event.type == pygame.KEYDOWN:
             # ESC key to go back to main menu from input states
-            if event.key == pygame.K_ESCAPE and self.state in ["enter_name", "enter_lobby_id", "lobby_browser"]:
+            if event.key == pygame.K_ESCAPE and self.state in [
+                "enter_name",
+                "enter_lobby_id",
+                "lobby_browser",
+            ]:
                 logger.info("ESC pressed, returning to main menu")
                 self.state = "main_menu"
                 self.input_text = ""
                 self.lobby_id = ""  # Reset lobby_id when going back
                 return
-            
+
             if self.state == "enter_name":
                 if event.key == pygame.K_RETURN:
                     self.player_name = self.input_text if self.input_text else "Player"
@@ -93,15 +98,19 @@ class MenuScene:
 
     def _handle_click(self, pos: tuple):
         logger.debug(f"Click detected at {pos} in state {self.state}")
-        
+
         # Handle back button for states that need it
-        if self.state in ["enter_name", "enter_lobby_id", "lobby_browser"] and self.buttons["back"].collidepoint(pos):
+        if self.state in [
+            "enter_name",
+            "enter_lobby_id",
+            "lobby_browser",
+        ] and self.buttons["back"].collidepoint(pos):
             logger.info("Back button clicked, returning to main menu")
             self.state = "main_menu"
             self.input_text = ""
             self.lobby_id = ""  # Reset lobby_id when going back
             return
-        
+
         if self.state == "main_menu":
             if self.buttons["create_lobby"].collidepoint(pos):
                 logger.info("Create lobby button clicked")
@@ -122,7 +131,7 @@ class MenuScene:
                 logger.info("Refresh button clicked")
                 if self.network_manager.is_connected():
                     asyncio.create_task(self.network_manager.list_lobbies())
-            
+
             # Handle lobby selection
             for i, lobby in enumerate(self.available_lobbies):
                 lobby_rect = pygame.Rect(200, 150 + i * 70, 600, 60)
@@ -130,12 +139,16 @@ class MenuScene:
                     # Only allow joining if lobby is not in active game
                     status = lobby.get("status", "waiting")
                     if status == "in_game":
-                        logger.info(f"Cannot join lobby {lobby['lobby_id']} - game in progress")
+                        logger.info(
+                            f"Cannot join lobby {lobby['lobby_id']} - game in progress"
+                        )
                         # TODO: Could show a message to user here
                         return
                     elif status == "full":
-                        logger.info(f"Cannot join lobby {lobby['lobby_id']} - lobby full")
-                        # TODO: Could show a message to user here  
+                        logger.info(
+                            f"Cannot join lobby {lobby['lobby_id']} - lobby full"
+                        )
+                        # TODO: Could show a message to user here
                         return
                     else:
                         logger.info(f"Joining lobby {lobby['lobby_id']}")
@@ -211,12 +224,13 @@ class MenuScene:
         logger.info("Game started, switching to game scene")
         try:
             from client.scenes.game_scene import GameScene
+
             game_state = data["game_state"]
-            logger.info(f"Creating GameScene with game state keys: {list(game_state.keys())}")
-            
-            self.next_scene = GameScene(
-                self.screen, self.network_manager, game_state
+            logger.info(
+                f"Creating GameScene with game state keys: {list(game_state.keys())}"
             )
+
+            self.next_scene = GameScene(self.screen, self.network_manager, game_state)
             logger.info("GameScene created successfully")
         except Exception as e:
             logger.error(f"Failed to create GameScene: {e}", exc_info=True)
@@ -270,23 +284,31 @@ class MenuScene:
             text_surf = self.small_font.render(text, True, COLORS["WHITE"])
             text_rect = text_surf.get_rect(center=rect.center)
             screen.blit(text_surf, text_rect)
-            
+
         # Instructions
-        instruction_text = self.small_font.render("'Browse Lobbies' shows available lobbies for joining", True, COLORS["GRAY"])
-        instruction_rect = instruction_text.get_rect(center=(screen.get_width() // 2, 500))
+        instruction_text = self.small_font.render(
+            "'Browse Lobbies' shows available lobbies for joining", True, COLORS["GRAY"]
+        )
+        instruction_rect = instruction_text.get_rect(
+            center=(screen.get_width() // 2, 500)
+        )
         screen.blit(instruction_text, instruction_rect)
 
     def _render_name_input(self, screen: pygame.Surface):
         if self.lobby_id:
-            prompt = self.font.render(f"Enter your name to join lobby:", True, COLORS["WHITE"])
-            lobby_text = self.small_font.render(f"Lobby: {self.lobby_id[:8]}...", True, COLORS["CYAN"])
+            prompt = self.font.render(
+                "Enter your name to join lobby:", True, COLORS["WHITE"]
+            )
+            lobby_text = self.small_font.render(
+                f"Lobby: {self.lobby_id[:8]}...", True, COLORS["CYAN"]
+            )
         else:
             prompt = self.font.render("Enter your name:", True, COLORS["WHITE"])
             lobby_text = None
-            
+
         prompt_rect = prompt.get_rect(center=(screen.get_width() // 2, 180))
         screen.blit(prompt, prompt_rect)
-        
+
         if lobby_text:
             lobby_rect = lobby_text.get_rect(center=(screen.get_width() // 2, 210))
             screen.blit(lobby_text, lobby_rect)
@@ -335,14 +357,18 @@ class MenuScene:
         title = self.font.render("Lobby", True, COLORS["WHITE"])
         title_rect = title.get_rect(center=(screen.get_width() // 2, 80))
         screen.blit(title, title_rect)
-        
+
         # Display lobby ID
-        lobby_id_text = self.small_font.render(f"Lobby ID: {self.lobby_id}", True, COLORS["CYAN"])
+        lobby_id_text = self.small_font.render(
+            f"Lobby ID: {self.lobby_id}", True, COLORS["CYAN"]
+        )
         lobby_id_rect = lobby_id_text.get_rect(center=(screen.get_width() // 2, 110))
         screen.blit(lobby_id_text, lobby_id_rect)
-        
+
         # Instructions
-        instructions = self.small_font.render("Share this Lobby ID with friends to let them join!", True, COLORS["GRAY"])
+        instructions = self.small_font.render(
+            "Share this Lobby ID with friends to let them join!", True, COLORS["GRAY"]
+        )
         instructions_rect = instructions.get_rect(center=(screen.get_width() // 2, 130))
         screen.blit(instructions, instructions_rect)
 
@@ -380,10 +406,10 @@ class MenuScene:
         refresh_text_rect = refresh_text.get_rect(center=self.buttons["refresh"].center)
         screen.blit(refresh_text, refresh_text_rect)
 
-
-
         # Auto-refresh indicator
-        refresh_progress = 1.0 - (self.lobby_list_refresh_timer / self.lobby_list_refresh_interval)
+        refresh_progress = 1.0 - (
+            self.lobby_list_refresh_timer / self.lobby_list_refresh_interval
+        )
         refresh_bar_width = int(100 * refresh_progress)
         refresh_bar = pygame.Rect(750, 100, refresh_bar_width, 5)
         pygame.draw.rect(screen, COLORS["GREEN"], refresh_bar)
@@ -396,13 +422,11 @@ class MenuScene:
                 center=(screen.get_width() // 2, 300)
             )
             screen.blit(no_lobbies_text, no_lobbies_rect)
-            
+
             hint_text = self.small_font.render(
                 "Create a lobby or wait for others to create one", True, COLORS["GRAY"]
             )
-            hint_rect = hint_text.get_rect(
-                center=(screen.get_width() // 2, 330)
-            )
+            hint_rect = hint_text.get_rect(center=(screen.get_width() // 2, 330))
             screen.blit(hint_text, hint_rect)
         else:
             # Header
@@ -413,14 +437,17 @@ class MenuScene:
             screen.blit(header_text, (500, header_y))
             header_text = self.small_font.render("Status", True, COLORS["WHITE"])
             screen.blit(header_text, (600, header_y))
-            
+
             for i, lobby in enumerate(self.available_lobbies):
                 lobby_rect = pygame.Rect(200, 150 + i * 70, 600, 60)
-                
+
                 # Determine lobby status and colors
                 status = lobby.get("status", "waiting")
-                is_joinable = status in ["waiting"] and lobby['player_count'] < lobby['max_players']
-                
+                is_joinable = (
+                    status in ["waiting"]
+                    and lobby["player_count"] < lobby["max_players"]
+                )
+
                 # Lobby background with different colors based on status
                 if status == "in_game":
                     color = (100, 50, 50)  # Dark red for active games
@@ -430,33 +457,41 @@ class MenuScene:
                     color = COLORS["DARK_GRAY"]
                 else:
                     color = COLORS["GRAY"]
-                    
+
                 pygame.draw.rect(screen, color, lobby_rect)
                 border_color = COLORS["GREEN"] if is_joinable else COLORS["WHITE"]
                 pygame.draw.rect(screen, border_color, lobby_rect, 2)
 
                 # Lobby ID (more characters for better identification)
-                lobby_id_short = lobby['lobby_id'][:12] + "..." if len(lobby['lobby_id']) > 15 else lobby['lobby_id']
-                lobby_id_text = self.small_font.render(lobby_id_short, True, COLORS["WHITE"])
+                lobby_id_short = (
+                    lobby["lobby_id"][:12] + "..."
+                    if len(lobby["lobby_id"]) > 15
+                    else lobby["lobby_id"]
+                )
+                lobby_id_text = self.small_font.render(
+                    lobby_id_short, True, COLORS["WHITE"]
+                )
                 screen.blit(lobby_id_text, (lobby_rect.x + 20, lobby_rect.y + 10))
 
                 # Player count
                 player_count_text = f"{lobby['player_count']}/{lobby['max_players']}"
-                player_text = self.small_font.render(player_count_text, True, COLORS["WHITE"])
+                player_text = self.small_font.render(
+                    player_count_text, True, COLORS["WHITE"]
+                )
                 screen.blit(player_text, (lobby_rect.x + 300, lobby_rect.y + 10))
 
                 # Status with appropriate colors
                 status_text_map = {
                     "waiting": "Waiting",
-                    "full": "Full", 
-                    "in_game": "In Game"
+                    "full": "Full",
+                    "in_game": "In Game",
                 }
                 status_color_map = {
                     "waiting": COLORS["GREEN"],
                     "full": COLORS["YELLOW"],
-                    "in_game": COLORS["RED"]
+                    "in_game": COLORS["RED"],
                 }
-                
+
                 status_display = status_text_map.get(status, status)
                 status_color = status_color_map.get(status, COLORS["WHITE"])
                 status_text = self.small_font.render(status_display, True, status_color)
@@ -464,13 +499,19 @@ class MenuScene:
 
                 # Action text
                 if is_joinable:
-                    action_text = self.small_font.render("Click to join", True, COLORS["CYAN"])
+                    action_text = self.small_font.render(
+                        "Click to join", True, COLORS["CYAN"]
+                    )
                     screen.blit(action_text, (lobby_rect.x + 20, lobby_rect.y + 35))
                 elif status == "in_game":
-                    action_text = self.small_font.render("Game in progress", True, COLORS["YELLOW"])
+                    action_text = self.small_font.render(
+                        "Game in progress", True, COLORS["YELLOW"]
+                    )
                     screen.blit(action_text, (lobby_rect.x + 20, lobby_rect.y + 35))
                 elif status == "full":
-                    action_text = self.small_font.render("Lobby full", True, COLORS["YELLOW"])
+                    action_text = self.small_font.render(
+                        "Lobby full", True, COLORS["YELLOW"]
+                    )
                     screen.blit(action_text, (lobby_rect.x + 20, lobby_rect.y + 35))
 
         # Back button

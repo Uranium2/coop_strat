@@ -1,9 +1,10 @@
 import asyncio
-import websockets
 import json
-import uuid
 import logging
-from typing import Optional, Callable, Dict, Any
+import uuid
+from typing import Any, Callable, Dict, Optional
+
+import websockets
 
 logger = logging.getLogger(__name__)
 

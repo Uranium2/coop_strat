@@ -1,12 +1,15 @@
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
+
 from pydantic import BaseModel
+
 
 class HeroType(str, Enum):
     TANK = "TANK"
-    BUILDER = "BUILDER" 
+    BUILDER = "BUILDER"
     ARCHER = "ARCHER"
     MAGE = "MAGE"
+
 
 class ResourceType(str, Enum):
     WOOD = "wood"
@@ -14,6 +17,7 @@ class ResourceType(str, Enum):
     WHEAT = "wheat"
     METAL = "metal"
     GOLD = "gold"
+
 
 class BuildingType(str, Enum):
     TOWN_HALL = "TOWN_HALL"
@@ -27,10 +31,12 @@ class BuildingType(str, Enum):
     ARCHERY_RANGE = "ARCHERY_RANGE"
     CANNON_FOUNDRY = "CANNON_FOUNDRY"
 
+
 class UnitType(str, Enum):
     SOLDIER = "SOLDIER"
     ARCHER = "ARCHER"
     CANNON = "CANNON"
+
 
 class TileType(str, Enum):
     EMPTY = "EMPTY"
@@ -41,9 +47,11 @@ class TileType(str, Enum):
     GOLD = "GOLD"
     WALL = "WALL"
 
+
 class Position(BaseModel):
     x: float
     y: float
+
 
 class Resources(BaseModel):
     wood: int = 0
@@ -52,6 +60,7 @@ class Resources(BaseModel):
     metal: int = 0
     gold: int = 0
 
+
 class Hero(BaseModel):
     id: str
     player_id: str
@@ -59,6 +68,7 @@ class Hero(BaseModel):
     position: Position
     health: int
     max_health: int
+
 
 class Building(BaseModel):
     id: str
@@ -69,6 +79,7 @@ class Building(BaseModel):
     player_id: str
     size: Tuple[int, int]
 
+
 class Unit(BaseModel):
     id: str
     unit_type: UnitType
@@ -78,6 +89,7 @@ class Unit(BaseModel):
     player_id: str
     target_position: Optional[Position] = None
 
+
 class Enemy(BaseModel):
     id: str
     position: Position
@@ -86,6 +98,7 @@ class Enemy(BaseModel):
     target_position: Optional[Position] = None
     is_active: bool = False
 
+
 class Player(BaseModel):
     id: str
     name: str
@@ -93,24 +106,30 @@ class Player(BaseModel):
     resources: Resources
     is_connected: bool = True
 
+
 class PingType(str, Enum):
     ATTENTION = "ATTENTION"  # General attention ping
-    DANGER = "DANGER"        # Warning ping
+    DANGER = "DANGER"  # Warning ping
     MOVE_HERE = "MOVE_HERE"  # Movement suggestion
-    HELP = "HELP"           # Request for help
+    HELP = "HELP"  # Request for help
+
 
 class TargetType(str, Enum):
-    POSITION = "POSITION"    # Move to a specific position
-    HERO = "HERO"           # Follow another hero
-    BUILDING = "BUILDING"   # Move to a building
-    ENEMY = "ENEMY"         # Move to an enemy
-    UNIT = "UNIT"           # Move to a unit
+    POSITION = "POSITION"  # Move to a specific position
+    HERO = "HERO"  # Follow another hero
+    BUILDING = "BUILDING"  # Move to a building
+    ENEMY = "ENEMY"  # Move to an enemy
+    UNIT = "UNIT"  # Move to a unit
+
 
 class MovementTarget(BaseModel):
     target_type: TargetType
     position: Position  # Current target position
-    target_id: Optional[str] = None  # ID of entity being followed (hero/building/enemy/unit)
+    target_id: Optional[str] = (
+        None  # ID of entity being followed (hero/building/enemy/unit)
+    )
     follow_distance: float = 1.0  # How close to get to the target
+
 
 class Ping(BaseModel):
     id: str
@@ -120,6 +139,7 @@ class Ping(BaseModel):
     ping_type: PingType
     timestamp: float
     duration: float = 5.0  # How long the ping lasts in seconds
+
 
 class GameState(BaseModel):
     lobby_id: str = ""
@@ -133,6 +153,7 @@ class GameState(BaseModel):
     fog_of_war: List[List[bool]]
     game_time: float
     is_active: bool = False
+
 
 class MapTile(BaseModel):
     tile_type: TileType
