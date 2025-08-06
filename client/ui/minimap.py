@@ -143,16 +143,18 @@ class Minimap:
             # Calculate fade effect
             fade_factor = 1.0 - (age / ping.duration)
             
-            # Get ping color based on type
+            # Get ping color based on type (matching radial menu colors)
             from shared.models.game_models import PingType
-            if ping.ping_type == PingType.DANGER:
+            if ping.ping_type == PingType.ATTENTION:
+                color = (255, 255, 0)  # Yellow
+            elif ping.ping_type == PingType.DANGER:
                 color = (255, 0, 0)  # Red
             elif ping.ping_type == PingType.HELP:
-                color = (255, 255, 0)  # Yellow
-            elif ping.ping_type == PingType.MOVE_HERE:
                 color = (0, 255, 0)  # Green
-            else:  # ATTENTION
+            elif ping.ping_type == PingType.MOVE_HERE:
                 color = (0, 150, 255)  # Blue
+            else:
+                color = (255, 255, 255)  # White fallback
             
             # Draw ping as a small circle
             radius = max(1, int(3 * fade_factor))

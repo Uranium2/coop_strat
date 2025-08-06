@@ -6,10 +6,12 @@ from client.utils.network_manager import NetworkManager
 from client.ui.minimap import Minimap
 from client.ui.resource_panel import ResourcePanel
 from client.ui.selection_panel import SelectionPanel
+from client.ui.radial_ping_menu import RadialPingMenu
 from shared.constants.game_constants import (
     COLORS, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, FOG_COLOR, VISION_RADIUS
 )
 from shared.models.game_models import GameState, TileType, Position
+from client.scenes.menu_scene import MenuScene
 
 class GameScene:
     def __init__(self, screen: pygame.Surface, network_manager: NetworkManager, initial_game_state: Dict[str, Any]):
@@ -54,6 +56,10 @@ class GameScene:
         self.minimap = Minimap(20, screen.get_height() - 220, 200, 200)
         self.resource_panel = ResourcePanel(screen.get_width() - 300, screen.get_height() - 100, 280, 80)
         self.selection_panel = SelectionPanel(screen.get_width()//2 - 150, screen.get_height() - 120, 300, 100)
+        self.radial_ping_menu = RadialPingMenu()
+        
+        # Track CTRL key state for ping menu
+        self.ctrl_pressed = False
         
         self.fog_surface = pygame.Surface((MAP_WIDTH * TILE_SIZE, MAP_HEIGHT * TILE_SIZE), pygame.SRCALPHA)
         self.tile_colors = {
@@ -74,28 +80,64 @@ class GameScene:
     def handle_event(self, event: pygame.event.Event):
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
-                if self.build_mode:
+                if self.radial_ping_menu.is_active:
+                    self.radial_ping_menu.deactivate()
+                elif self.build_mode:
                     self.build_mode = None
                 else:
                     from client.scenes.menu_scene import MenuScene
                     self.next_scene = MenuScene(self.screen, self.network_manager)
+            elif event.key == pygame.K_LCTRL or event.key == pygame.K_RCTRL:
+                self.ctrl_pressed = True
+                # Activate radial ping menu immediately at mouse position
+                mouse_pos = pygame.mouse.get_pos()
+                # Only activate if mouse is in the main game area (not on UI elements)
+                if self._is_mouse_in_game_area(mouse_pos):
+                    self.radial_ping_menu.activate(mouse_pos)
             elif event.key in self.build_keys and self.selected_entity and hasattr(self.selected_entity, 'hero_type'):
                 self.build_mode = self.build_keys[event.key]
             elif event.key in self.keys_pressed:
                 self.keys_pressed[event.key] = True
         
         elif event.type == pygame.KEYUP:
-            if event.key in self.keys_pressed:
+            if event.key == pygame.K_LCTRL or event.key == pygame.K_RCTRL:
+                # Create ping if menu is active and something is hovered
+                if self.radial_ping_menu.is_active:
+                    mouse_pos = pygame.mouse.get_pos()
+                    selected_ping = self.radial_ping_menu.get_selected_ping(mouse_pos)
+                    if selected_ping:
+                        # Create ping with selected type
+                        world_pos = self._screen_to_world(self.radial_ping_menu.center_pos)
+                        self._create_ping(world_pos[0], world_pos[1], selected_ping)
+                    self.radial_ping_menu.deactivate()
+                
+                self.ctrl_pressed = False
+            elif event.key in self.keys_pressed:
                 self.keys_pressed[event.key] = False
         
+        elif event.type == pygame.MOUSEMOTION:
+            # Update ping menu hover if active
+            if self.radial_ping_menu.is_active:
+                self.radial_ping_menu.update_hover(event.pos)
+        
         elif event.type == pygame.MOUSEBUTTONDOWN:
+            # Check if ping menu is active and handle selection
+            if self.radial_ping_menu.is_active and event.button == 1:
+                selected_ping = self.radial_ping_menu.get_selected_ping(event.pos)
+                if selected_ping:
+                    # Create ping with selected type
+                    world_pos = self._screen_to_world(self.radial_ping_menu.center_pos)
+                    self._create_ping(world_pos[0], world_pos[1], selected_ping)
+                self.radial_ping_menu.deactivate()
+                return
+            
             # Check if click is on minimap first
             minimap_click = self.minimap.handle_click(event.pos, event.button)
             if minimap_click:
                 world_x, world_y, button = minimap_click
                 if button == 1:  # Left click - move camera
                     self._move_camera_to_world_position(world_x, world_y)
-                elif button == 3:  # Right click - create ping
+                elif button == 3:  # Right click - create ping (default ATTENTION type)
                     self._create_ping(world_x, world_y)
             else:
                 # Handle regular game area clicks
@@ -288,23 +330,48 @@ class GameScene:
         self.camera_x = int(max(0, min(MAP_WIDTH * TILE_SIZE - self.screen.get_width(), target_camera_x)))
         self.camera_y = int(max(0, min(MAP_HEIGHT * TILE_SIZE - self.screen.get_height(), target_camera_y)))
     
-    def _create_ping(self, world_x: float, world_y: float):
+    def _create_ping(self, world_x: float, world_y: float, ping_type=None):
         """Create a ping at the specified world position"""
         import uuid
         import time
         from shared.models.game_models import PingType
         
+        # Default to ATTENTION if no type specified
+        if ping_type is None:
+            ping_type = PingType.ATTENTION
+        
         ping_data = {
             "type": "create_ping",
             "ping_id": str(uuid.uuid4()),
             "position": {"x": world_x, "y": world_y},
-            "ping_type": PingType.ATTENTION.value,
+            "ping_type": ping_type.value,
             "timestamp": time.time()
         }
         
         # Send ping to server
         import asyncio
         asyncio.create_task(self.network_manager.send_message(ping_data))
+    
+    def _is_mouse_in_game_area(self, mouse_pos: tuple) -> bool:
+        """Check if mouse position is in the main game area (not on UI elements)"""
+        x, y = mouse_pos
+        screen_width = self.screen.get_width()
+        screen_height = self.screen.get_height()
+        
+        # Check if mouse is over minimap
+        if (20 <= x <= 220 and screen_height - 220 <= y <= screen_height - 20):
+            return False
+        
+        # Check if mouse is over resource panel
+        if (screen_width - 300 <= x <= screen_width and screen_height - 100 <= y <= screen_height):
+            return False
+        
+        # Check if mouse is over selection panel
+        if (screen_width//2 - 150 <= x <= screen_width//2 + 150 and screen_height - 120 <= y <= screen_height):
+            return False
+        
+        # Mouse is in game area
+        return True
     
     def _on_game_update(self, data):
         self.game_state = GameState(**data["game_state"])
@@ -361,6 +428,9 @@ class GameScene:
         
         if self.build_mode:
             self._render_build_info(screen)
+        
+        # Render radial ping menu on top of everything
+        self.radial_ping_menu.draw(screen)
         
         # Render lobby ID at the top of the screen
         self._render_lobby_info(screen)
@@ -496,16 +566,18 @@ class GameScene:
                 fade_factor = 1.0 - (age / ping.duration)
                 alpha = int(255 * fade_factor)
                 
-                # Get ping color based on type
+                # Get ping color based on type (matching radial menu colors)
                 from shared.models.game_models import PingType
-                if ping.ping_type == PingType.DANGER:
+                if ping.ping_type == PingType.ATTENTION:
+                    base_color = (255, 255, 0)  # Yellow
+                elif ping.ping_type == PingType.DANGER:
                     base_color = (255, 0, 0)  # Red
                 elif ping.ping_type == PingType.HELP:
-                    base_color = (255, 255, 0)  # Yellow
-                elif ping.ping_type == PingType.MOVE_HERE:
                     base_color = (0, 255, 0)  # Green
-                else:  # ATTENTION
+                elif ping.ping_type == PingType.MOVE_HERE:
                     base_color = (0, 150, 255)  # Blue
+                else:
+                    base_color = (255, 255, 255)  # White fallback
                 
                 # Create animated ping effect
                 ping_radius = int(20 + 10 * math.sin(age * 8))  # Pulsing animation
