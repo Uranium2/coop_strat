@@ -1,0 +1,12 @@
+*.log
+# Python cache files
+__pycache__/
+*.py[cod]
+# Cython debug symbols
+cython_debug/
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+.eggs/

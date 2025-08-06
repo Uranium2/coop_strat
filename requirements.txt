@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+websockets
+redis
+pygame
+pydantic
+asyncio-mqtt
+numpy
