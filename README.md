@@ -1,6 +1,6 @@
 # Co-op Survival RTS Game
 
-A cooperative survival RTS game inspired by Age of Darkness: Final Stand, built with Python, Pygame, and FastAPI.
+A cooperative survival RTS game, built with Python, Pygame, and FastAPI.
 
 ## Architecture
 
