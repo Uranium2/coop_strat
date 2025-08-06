@@ -4,14 +4,14 @@ import logging
 from typing import Dict, List, Optional
 from shared.models.game_models import (
     GameState, Player, Hero, Building, Unit, Enemy, Position, 
-    HeroType, BuildingType, TileType, Resources
+    HeroType, BuildingType, TileType, Resources, MovementTarget, TargetType
 )
 from shared.constants.game_constants import (
     MAP_WIDTH, MAP_HEIGHT, HERO_TYPES, BUILDING_TYPES, 
     RESOURCE_TICK_RATE, WAVE_SPAWN_INTERVAL, ENEMY_SPAWN_CORNERS
 )
 from server.services.map_generator import MapGenerator
-from server.services.pathfinding import PathfindingService
+from server.services.pathfinding import Pathfinder
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +34,12 @@ class GameManager:
         self.last_resource_tick = time.time()
         self.last_wave_spawn = time.time()
         self.wave_number = 0
-        self.pathfinding = PathfindingService(MAP_WIDTH, MAP_HEIGHT)
+        self.pathfinder = Pathfinder(MAP_WIDTH, MAP_HEIGHT)
         self.enemy_paths = {}
         
-        # Movement and tick system
-        self.hero_targets = {}  # Store movement targets for heroes
+        # Movement and tick system  
+        self.hero_targets: Dict[str, MovementTarget] = {}  # Store movement targets for heroes
+        self.hero_paths: Dict[str, List[Position]] = {}   # Store current paths for heroes
         self.last_update = time.time()
         self.tick_rate = 60  # 60 FPS server tick rate
         self.network_update_rate = 20  # Send updates to clients 20 times per second
@@ -142,45 +143,296 @@ class GameManager:
         return None
     
     def _update_hero_movements(self, dt: float):
-        """Update hero positions based on their movement targets"""
+        """Update hero positions using pathfinding"""
         for hero_id, hero in self.game_state.heroes.items():
-            if hero_id in self.hero_targets:
-                target_pos = self.hero_targets[hero_id]
-                hero_stats = HERO_TYPES[hero.hero_type.value]
-                speed = hero_stats["speed"]  # tiles per second
+            if hero_id not in self.hero_targets:
+                continue
                 
-                # Calculate direction to target
-                dx = target_pos.x - hero.position.x
-                dy = target_pos.y - hero.position.y
+            target = self.hero_targets[hero_id]
+            
+            # Update target position if following a dynamic entity
+            if target.target_type != TargetType.POSITION and target.target_id:
+                new_target_pos = self._get_target_position(target)
+                if new_target_pos:
+                    # Check if target moved significantly
+                    if (abs(new_target_pos.x - target.position.x) > 0.5 or 
+                        abs(new_target_pos.y - target.position.y) > 0.5):
+                        target.position = new_target_pos
+                        # Recalculate path if target moved
+                        self._calculate_path_to_target(hero_id, hero, target)
+                else:
+                    # Target no longer exists, stop movement
+                    del self.hero_targets[hero_id]
+                    if hero_id in self.hero_paths:
+                        del self.hero_paths[hero_id]
+                    continue
+            
+            # Get or calculate path
+            if hero_id not in self.hero_paths:
+                self._calculate_path_to_target(hero_id, hero, target)
+            
+            path = self.hero_paths.get(hero_id, [])
+            if not path:
+                # No valid path, remove target
+                del self.hero_targets[hero_id]
+                continue
+            
+            # Move along path
+            hero_stats = HERO_TYPES[hero.hero_type.value]
+            speed = hero_stats["speed"]  # tiles per second
+            
+            while path and len(path) > 0:
+                next_pos = path[0]
+                
+                # Calculate direction and distance to next waypoint
+                dx = next_pos.x - hero.position.x
+                dy = next_pos.y - hero.position.y
                 distance = (dx * dx + dy * dy) ** 0.5
                 
-                if distance > 0.1:  # Still moving towards target
-                    # Normalize direction and apply speed
-                    move_distance = speed * dt
-                    if move_distance >= distance:
-                        # Reached target
-                        hero.position.x = target_pos.x
-                        hero.position.y = target_pos.y
-                        del self.hero_targets[hero_id]
-                        logger.debug(f"Hero {hero_id} reached target {target_pos.x}, {target_pos.y}")
-                    else:
-                        # Move towards target
-                        move_x = (dx / distance) * move_distance
-                        move_y = (dy / distance) * move_distance
-                        hero.position.x += move_x
-                        hero.position.y += move_y
-                        
-                        # Ensure hero stays within map bounds
-                        hero.position.x = max(0, min(MAP_WIDTH - 1, hero.position.x))
-                        hero.position.y = max(0, min(MAP_HEIGHT - 1, hero.position.y))
-                    
-                    self.state_changed = True
-                    # Update vision when hero moves
-                    self._update_vision(hero.player_id)
+                if distance <= 0.1:  # Reached waypoint
+                    path.pop(0)  # Remove reached waypoint
+                    continue
+                
+                # Move towards waypoint
+                move_distance = speed * dt
+                if move_distance >= distance:
+                    # Reached this waypoint
+                    hero.position.x = next_pos.x
+                    hero.position.y = next_pos.y
+                    path.pop(0)
                 else:
-                    # Already at target
-                    if hero_id in self.hero_targets:
-                        del self.hero_targets[hero_id]
+                    # Move towards waypoint
+                    move_x = (dx / distance) * move_distance
+                    move_y = (dy / distance) * move_distance
+                    
+                    # Check for dynamic obstacles (other heroes, enemies)
+                    new_x = hero.position.x + move_x
+                    new_y = hero.position.y + move_y
+                    
+                    if self._is_dynamic_obstacle_at(new_x, new_y, hero_id):
+                        # Recalculate path to avoid dynamic obstacle
+                        self._calculate_path_to_target(hero_id, hero, target)
+                        break
+                    
+                    hero.position.x = new_x
+                    hero.position.y = new_y
+                    
+                    # Ensure hero stays within map bounds
+                    hero.position.x = max(0.5, min(MAP_WIDTH - 0.5, hero.position.x))
+                    hero.position.y = max(0.5, min(MAP_HEIGHT - 0.5, hero.position.y))
+                
+                break  # Only process one waypoint per frame
+            
+            # Check if reached final target
+            if not path or len(path) == 0:
+                final_distance = ((hero.position.x - target.position.x) ** 2 + 
+                                (hero.position.y - target.position.y) ** 2) ** 0.5
+                
+                if final_distance <= target.follow_distance:
+                    # Reached target
+                    del self.hero_targets[hero_id]
+                    if hero_id in self.hero_paths:
+                        del self.hero_paths[hero_id]
+                    logger.debug(f"Hero {hero_id} reached target")
+                else:
+                    # Recalculate path if not reached target but no path
+                    self._calculate_path_to_target(hero_id, hero, target)
+            
+            self.state_changed = True
+            # Update vision when hero moves
+            self._update_vision(hero.player_id)
+    
+    def _get_target_position(self, target: MovementTarget) -> Optional[Position]:
+        """Get current position of a dynamic target"""
+        if target.target_type == TargetType.HERO and target.target_id:
+            hero = self.game_state.heroes.get(target.target_id)
+            return hero.position if hero else None
+        elif target.target_type == TargetType.BUILDING and target.target_id:
+            building = self.game_state.buildings.get(target.target_id)
+            if building and building.health > 0:
+                # Return position near building edge for interaction
+                return Position(
+                    x=building.position.x + building.size[0] / 2,
+                    y=building.position.y + building.size[1] / 2
+                )
+            return None
+        elif target.target_type == TargetType.ENEMY and target.target_id:
+            enemy = self.game_state.enemies.get(target.target_id)
+            return enemy.position if enemy and enemy.health > 0 else None
+        elif target.target_type == TargetType.UNIT and target.target_id:
+            unit = self.game_state.units.get(target.target_id)
+            return unit.position if unit and unit.health > 0 else None
+        else:
+            return target.position
+    
+    def _calculate_path_to_target(self, hero_id: str, hero: Hero, target: MovementTarget):
+        """Calculate path from hero to target using pathfinding"""
+        target_pos = target.position
+        
+        # Adjust target position to account for follow distance
+        if target.follow_distance > 0 and target.target_type != TargetType.POSITION:
+            # For buildings, get to the edge plus follow distance
+            if target.target_type == TargetType.BUILDING and target.target_id:
+                building = self.game_state.buildings.get(target.target_id)
+                if building:
+                    # Find nearest edge of building
+                    building_x = building.position.x
+                    building_y = building.position.y
+                    width, height = building.size
+                    
+                    # Calculate which edge is closest
+                    hero_x, hero_y = hero.position.x, hero.position.y
+                    
+                    # Find closest point on building perimeter
+                    closest_x = max(building_x, min(hero_x, building_x + width))
+                    closest_y = max(building_y, min(hero_y, building_y + height))
+                    
+                    # Move away from building by follow distance
+                    dx = hero_x - closest_x
+                    dy = hero_y - closest_y
+                    dist = (dx*dx + dy*dy)**0.5
+                    
+                    if dist > 0:
+                        dx /= dist
+                        dy /= dist
+                        target_pos = Position(
+                            x=closest_x + dx * target.follow_distance,
+                            y=closest_y + dy * target.follow_distance
+                        )
+        
+        # Find path
+        path = self.pathfinder.find_path(
+            hero.position.x, hero.position.y,
+            target_pos.x, target_pos.y,
+            self.game_state, hero_id
+        )
+        
+        if path:
+            self.hero_paths[hero_id] = path
+            logger.debug(f"Calculated path for hero {hero_id} with {len(path)} waypoints")
+        else:
+            logger.debug(f"No path found for hero {hero_id} to target")
+            # Remove target if no path possible
+            if hero_id in self.hero_paths:
+                del self.hero_paths[hero_id]
+    
+    def _is_dynamic_obstacle_at(self, x: float, y: float, excluding_hero_id: str = None) -> bool:
+        """Check for dynamic obstacles (other heroes, enemies) - for pathfinding recalculation"""
+        collision_radius = 0.4
+        
+        # Check other heroes
+        for hero_id, hero in self.game_state.heroes.items():
+            if hero_id == excluding_hero_id:
+                continue
+            dx = abs(hero.position.x - x)
+            dy = abs(hero.position.y - y)
+            if dx < collision_radius and dy < collision_radius:
+                return True
+        
+        # Check enemies
+        for enemy in self.game_state.enemies.values():
+            if enemy.health <= 0:
+                continue
+            dx = abs(enemy.position.x - x)
+            dy = abs(enemy.position.y - y)
+            if dx < collision_radius and dy < collision_radius:
+                return True
+        
+        return False
+    
+    def _is_position_blocked(self, x: float, y: float, excluding_hero_id: str = None) -> bool:
+        """Check if a position is blocked by any collision"""
+        # Convert to integer tile coordinates
+        tile_x = int(x)
+        tile_y = int(y)
+        
+        # Check map bounds
+        if tile_x < 0 or tile_x >= MAP_WIDTH or tile_y < 0 or tile_y >= MAP_HEIGHT:
+            return True
+        
+        # Check tile collision (trees and walls)
+        if self._is_tile_collidable(tile_x, tile_y):
+            return True
+        
+        # Check building collision
+        if self._is_building_at_position(x, y):
+            return True
+        
+        # Check hero collision
+        if self._is_hero_at_position(x, y, excluding_hero_id):
+            return True
+        
+        # Check enemy collision
+        if self._is_enemy_at_position(x, y):
+            return True
+        
+        return False
+    
+    def _is_tile_collidable(self, tile_x: int, tile_y: int) -> bool:
+        """Check if a tile type is collidable"""
+        from shared.models.game_models import TileType
+        
+        if tile_x < 0 or tile_x >= len(self.game_state.map_data[0]) or tile_y < 0 or tile_y >= len(self.game_state.map_data):
+            return True
+        
+        tile_type = self.game_state.map_data[tile_y][tile_x]
+        # WOOD tiles (trees) and WALL tiles are collidable
+        return tile_type in [TileType.WOOD, TileType.WALL]
+    
+    def _is_building_at_position(self, x: float, y: float) -> bool:
+        """Check if there's a building at the given position"""
+        hero_radius = 0.4  # Heroes have a collision radius
+        
+        for building in self.game_state.buildings.values():
+            if building.health <= 0:  # Skip destroyed buildings
+                continue
+            
+            # Check if hero's collision area overlaps with building
+            building_x = building.position.x
+            building_y = building.position.y
+            width, height = building.size
+            
+            # Expand building bounds by hero radius for proper collision
+            if (building_x - hero_radius <= x <= building_x + width + hero_radius and 
+                building_y - hero_radius <= y <= building_y + height + hero_radius):
+                return True
+        
+        return False
+    
+    def _is_hero_at_position(self, x: float, y: float, excluding_hero_id: str = None) -> bool:
+        """Check if there's another hero at the given position"""
+        collision_radius = 0.4  # Heroes occupy roughly a 0.8x0.8 area
+        
+        for hero_id, hero in self.game_state.heroes.items():
+            if hero_id == excluding_hero_id:  # Don't collide with self
+                continue
+            
+            # Check distance between positions
+            dx = abs(hero.position.x - x)
+            dy = abs(hero.position.y - y)
+            
+            if dx < collision_radius and dy < collision_radius:
+                return True
+        
+        return False
+    
+    def _is_enemy_at_position(self, x: float, y: float) -> bool:
+        """Check if there's an enemy at the given position"""
+        collision_radius = 0.4  # Enemies occupy roughly a 0.8x0.8 area
+        
+        for enemy in self.game_state.enemies.values():
+            if enemy.health <= 0:  # Skip dead enemies
+                continue
+            
+            # Check distance between positions
+            dx = abs(enemy.position.x - x)
+            dy = abs(enemy.position.y - y)
+            
+            if dx < collision_radius and dy < collision_radius:
+                return True
+        
+        return False
+    
     def _update_resources(self):
         for player_id, player in self.game_state.players.items():
             resource_income = Resources()
@@ -362,12 +614,81 @@ class GameManager:
     def move_hero(self, player_id: str, target_position: Position) -> bool:
         hero = self._get_player_hero(player_id)
         if hero:
-            # Set movement target instead of teleporting
-            self.hero_targets[hero.id] = target_position
+            # Create movement target for position
+            target = MovementTarget(
+                target_type=TargetType.POSITION,
+                position=target_position,
+                follow_distance=0.5
+            )
+            
+            # Set movement target and calculate initial path
+            self.hero_targets[hero.id] = target
+            self._calculate_path_to_target(hero.id, hero, target)
+            
             logger.debug(f"Hero {hero.id} targeting position {target_position.x}, {target_position.y}")
             self.state_changed = True
             return True
         return False
+    
+    def move_hero_to_target(self, player_id: str, target_type: TargetType, target_id: str = None, 
+                           target_position: Position = None) -> bool:
+        """Move hero to a specific target (building, enemy, unit, hero)"""
+        hero = self._get_player_hero(player_id)
+        if not hero:
+            return False
+        
+        # Determine follow distance based on target type
+        follow_distance = 1.0  # Default distance
+        if target_type == TargetType.BUILDING:
+            follow_distance = 1.5  # Stay a bit away from buildings
+        elif target_type in [TargetType.ENEMY, TargetType.UNIT]:
+            follow_distance = 1.0  # Close enough for combat/interaction
+        elif target_type == TargetType.HERO:
+            follow_distance = 0.8  # Close to other heroes
+        
+        # Get target position
+        if target_position is None:
+            if target_type == TargetType.BUILDING and target_id:
+                building = self.game_state.buildings.get(target_id)
+                if not building or building.health <= 0:
+                    return False
+                target_position = Position(
+                    x=building.position.x + building.size[0] / 2,
+                    y=building.position.y + building.size[1] / 2
+                )
+            elif target_type == TargetType.HERO and target_id:
+                target_hero = self.game_state.heroes.get(target_id)
+                if not target_hero:
+                    return False
+                target_position = target_hero.position
+            elif target_type == TargetType.ENEMY and target_id:
+                enemy = self.game_state.enemies.get(target_id)
+                if not enemy or enemy.health <= 0:
+                    return False
+                target_position = enemy.position
+            elif target_type == TargetType.UNIT and target_id:
+                unit = self.game_state.units.get(target_id)
+                if not unit or unit.health <= 0:
+                    return False
+                target_position = unit.position
+            else:
+                return False
+        
+        # Create movement target
+        target = MovementTarget(
+            target_type=target_type,
+            position=target_position,
+            target_id=target_id,
+            follow_distance=follow_distance
+        )
+        
+        # Set movement target and calculate initial path
+        self.hero_targets[hero.id] = target
+        self._calculate_path_to_target(hero.id, hero, target)
+        
+        logger.debug(f"Hero {hero.id} targeting {target_type.value} {target_id or 'position'}")
+        self.state_changed = True
+        return True
     
     def build_structure(self, player_id: str, building_type: BuildingType, position: Position) -> bool:
         player = self.game_state.players.get(player_id)

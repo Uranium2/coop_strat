@@ -99,6 +99,19 @@ class PingType(str, Enum):
     MOVE_HERE = "MOVE_HERE"  # Movement suggestion
     HELP = "HELP"           # Request for help
 
+class TargetType(str, Enum):
+    POSITION = "POSITION"    # Move to a specific position
+    HERO = "HERO"           # Follow another hero
+    BUILDING = "BUILDING"   # Move to a building
+    ENEMY = "ENEMY"         # Move to an enemy
+    UNIT = "UNIT"           # Move to a unit
+
+class MovementTarget(BaseModel):
+    target_type: TargetType
+    position: Position  # Current target position
+    target_id: Optional[str] = None  # ID of entity being followed (hero/building/enemy/unit)
+    follow_distance: float = 1.0  # How close to get to the target
+
 class Ping(BaseModel):
     id: str
     player_id: str

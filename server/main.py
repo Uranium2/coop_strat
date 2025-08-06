@@ -311,6 +311,28 @@ async def handle_game_action(lobby_id: str, player_id: str, action: dict):
         else:
             logger.warning(f"Failed to move hero for {player_id}")
     
+    elif action_type == "move_to_target":
+        target_type = action.get("target_type")
+        target_id = action.get("target_id")
+        target_position = action.get("target_position")
+        
+        from shared.models.game_models import Position, TargetType
+        
+        # Convert target position if provided
+        pos = None
+        if target_position:
+            pos = Position(x=target_position["x"], y=target_position["y"])
+        
+        if game_manager.move_hero_to_target(player_id, TargetType(target_type), target_id, pos):
+            logger.debug(f"Hero targeting {target_type} for {player_id}")
+            updated_state = game_manager.get_game_state()
+            await manager.send_to_lobby(lobby_id, {
+                "type": "game_update", 
+                "game_state": updated_state.dict()
+            })
+        else:
+            logger.warning(f"Failed to target {target_type} for {player_id}")
+    
     elif action_type == "build":
         building_type = action.get("building_type")
         position_data = action.get("position")

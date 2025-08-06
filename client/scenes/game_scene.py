@@ -143,10 +143,57 @@ class GameScene:
         world_pos = self._screen_to_world(pos)
         
         if self.selected_entity and hasattr(self.selected_entity, 'hero_type'):
-            asyncio.create_task(self.network_manager.send_game_action({
-                "type": "move_hero",
-                "target_position": {"x": world_pos[0], "y": world_pos[1]}
-            }))
+            # Check what was clicked on
+            clicked_target = self._get_clicked_target(world_pos)
+            
+            if clicked_target:
+                target_type, target_id = clicked_target
+                # Send move to target command
+                asyncio.create_task(self.network_manager.send_game_action({
+                    "type": "move_to_target",
+                    "target_type": target_type,
+                    "target_id": target_id
+                }))
+            else:
+                # Move to position
+                asyncio.create_task(self.network_manager.send_game_action({
+                    "type": "move_hero",
+                    "target_position": {"x": world_pos[0], "y": world_pos[1]}
+                }))
+    
+    def _get_clicked_target(self, world_pos: tuple):
+        """Determine what entity was clicked on"""
+        x, y = world_pos
+        
+        # Check for heroes (prioritize over other entities)
+        for hero in self.game_state.heroes.values():
+            if hero.player_id != self.network_manager.player_id:  # Don't target own hero
+                distance = ((hero.position.x - x)**2 + (hero.position.y - y)**2)**0.5
+                if distance <= 1.0:  # Click tolerance
+                    return ("HERO", hero.id)
+        
+        # Check for enemies
+        for enemy in self.game_state.enemies.values():
+            if enemy.health > 0:
+                distance = ((enemy.position.x - x)**2 + (enemy.position.y - y)**2)**0.5
+                if distance <= 1.0:
+                    return ("ENEMY", enemy.id)
+        
+        # Check for units
+        for unit in self.game_state.units.values():
+            if unit.health > 0:
+                distance = ((unit.position.x - x)**2 + (unit.position.y - y)**2)**0.5
+                if distance <= 1.0:
+                    return ("UNIT", unit.id)
+        
+        # Check for buildings
+        for building in self.game_state.buildings.values():
+            if building.health > 0:
+                if (building.position.x <= x < building.position.x + building.size[0] and
+                    building.position.y <= y < building.position.y + building.size[1]):
+                    return ("BUILDING", building.id)
+        
+        return None
     
     def _handle_camera_movement(self, key):
         # This method is no longer used for continuous movement
