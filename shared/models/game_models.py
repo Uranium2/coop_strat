@@ -93,6 +93,21 @@ class Player(BaseModel):
     resources: Resources
     is_connected: bool = True
 
+class PingType(str, Enum):
+    ATTENTION = "ATTENTION"  # General attention ping
+    DANGER = "DANGER"        # Warning ping
+    MOVE_HERE = "MOVE_HERE"  # Movement suggestion
+    HELP = "HELP"           # Request for help
+
+class Ping(BaseModel):
+    id: str
+    player_id: str
+    player_name: str
+    position: Position
+    ping_type: PingType
+    timestamp: float
+    duration: float = 5.0  # How long the ping lasts in seconds
+
 class GameState(BaseModel):
     lobby_id: str = ""
     players: Dict[str, Player]
@@ -100,6 +115,7 @@ class GameState(BaseModel):
     buildings: Dict[str, Building]
     units: Dict[str, Unit]
     enemies: Dict[str, Enemy]
+    pings: Dict[str, Ping] = {}
     map_data: List[List[TileType]]
     fog_of_war: List[List[bool]]
     game_time: float

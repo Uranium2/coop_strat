@@ -244,6 +244,46 @@ async def handle_message(player_id: str, message: dict):
             "lobbies": lobbies
         })
     
+    elif message_type == "create_ping":
+        lobby_id = manager.player_lobbies.get(player_id)
+        if lobby_id:
+            ping_id = message.get("ping_id")
+            position_data = message.get("position")
+            ping_type = message.get("ping_type")
+            timestamp = message.get("timestamp")
+            
+            logger.debug(f"Creating ping from {player_id} at {position_data}")
+            
+            # Get player name
+            lobby = lobby_manager.get_lobby(lobby_id)
+            player_name = "Unknown"
+            if lobby and player_id in lobby.players:
+                player_name = lobby.players[player_id].name
+            
+            # Add ping to game state
+            game_manager = game_managers.get(lobby_id)
+            if game_manager:
+                from shared.models.game_models import Ping, Position, PingType
+                ping = Ping(
+                    id=ping_id,
+                    player_id=player_id,
+                    player_name=player_name,
+                    position=Position(x=position_data["x"], y=position_data["y"]),
+                    ping_type=PingType(ping_type),
+                    timestamp=timestamp,
+                    duration=5.0
+                )
+                
+                game_manager.game_state.pings[ping_id] = ping
+                
+                # Broadcast ping to all players in lobby
+                await manager.send_to_lobby(lobby_id, {
+                    "type": "ping_created",
+                    "ping": ping.dict()
+                })
+        else:
+            logger.warning(f"Player {player_id} tried to create ping but not in any lobby")
+    
     else:
         logger.warning(f"Unknown message type from {player_id}: {message_type}")
 

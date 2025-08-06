@@ -1,5 +1,6 @@
 import pygame
 import asyncio
+import math
 from typing import Dict, Any, Optional
 from client.utils.network_manager import NetworkManager
 from client.ui.minimap import Minimap
@@ -88,16 +89,26 @@ class GameScene:
                 self.keys_pressed[event.key] = False
         
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1:
-                if self.build_mode:
-                    self._handle_build_click(event.pos)
-                else:
-                    self._handle_left_click(event.pos)
-            elif event.button == 3:
-                if self.build_mode:
-                    self.build_mode = None
-                else:
-                    self._handle_right_click(event.pos)
+            # Check if click is on minimap first
+            minimap_click = self.minimap.handle_click(event.pos, event.button)
+            if minimap_click:
+                world_x, world_y, button = minimap_click
+                if button == 1:  # Left click - move camera
+                    self._move_camera_to_world_position(world_x, world_y)
+                elif button == 3:  # Right click - create ping
+                    self._create_ping(world_x, world_y)
+            else:
+                # Handle regular game area clicks
+                if event.button == 1:
+                    if self.build_mode:
+                        self._handle_build_click(event.pos)
+                    else:
+                        self._handle_left_click(event.pos)
+                elif event.button == 3:
+                    if self.build_mode:
+                        self.build_mode = None
+                    else:
+                        self._handle_right_click(event.pos)
     
     def _handle_build_click(self, pos: tuple):
         world_pos = self._screen_to_world(pos)
@@ -218,6 +229,36 @@ class GameScene:
             self.camera_x = int(max(0, min(MAP_WIDTH * TILE_SIZE - self.screen.get_width(), target_camera_x)))
             self.camera_y = int(max(0, min(MAP_HEIGHT * TILE_SIZE - self.screen.get_height(), target_camera_y)))
     
+    def _move_camera_to_world_position(self, world_x: float, world_y: float):
+        """Move camera to center on a specific world position"""
+        screen_center_x = self.screen.get_width() // 2
+        screen_center_y = self.screen.get_height() // 2
+        
+        target_camera_x = world_x * TILE_SIZE - screen_center_x
+        target_camera_y = world_y * TILE_SIZE - screen_center_y
+        
+        # Apply bounds checking
+        self.camera_x = int(max(0, min(MAP_WIDTH * TILE_SIZE - self.screen.get_width(), target_camera_x)))
+        self.camera_y = int(max(0, min(MAP_HEIGHT * TILE_SIZE - self.screen.get_height(), target_camera_y)))
+    
+    def _create_ping(self, world_x: float, world_y: float):
+        """Create a ping at the specified world position"""
+        import uuid
+        import time
+        from shared.models.game_models import PingType
+        
+        ping_data = {
+            "type": "create_ping",
+            "ping_id": str(uuid.uuid4()),
+            "position": {"x": world_x, "y": world_y},
+            "ping_type": PingType.ATTENTION.value,
+            "timestamp": time.time()
+        }
+        
+        # Send ping to server
+        import asyncio
+        asyncio.create_task(self.network_manager.send_message(ping_data))
+    
     def _on_game_update(self, data):
         self.game_state = GameState(**data["game_state"])
         self._update_fog_of_war()
@@ -258,6 +299,8 @@ class GameScene:
         self._render_fog_of_war(screen)
         # Render heroes AFTER fog of war so they're always visible
         self._render_heroes(screen)
+        # Render pings on top of everything else in the game world
+        self._render_pings(screen)
         
         current_player = self.game_state.players.get(self.network_manager.player_id)
         if current_player:
@@ -381,6 +424,61 @@ class GameScene:
                     bg_rect = name_rect.inflate(6, 2)
                     pygame.draw.rect(screen, (0, 0, 0, 128), bg_rect)
                     screen.blit(name_text, name_rect)
+    
+    def _render_pings(self, screen: pygame.Surface):
+        """Render map pings/markers"""
+        import time
+        current_time = time.time()
+        
+        for ping in self.game_state.pings.values():
+            # Check if ping is still active
+            age = current_time - ping.timestamp
+            if age >= ping.duration:
+                continue
+            
+            screen_pos = self._world_to_screen((ping.position.x, ping.position.y))
+            
+            # Only render if on screen
+            if (-50 < screen_pos[0] < screen.get_width() + 50 and
+                -50 < screen_pos[1] < screen.get_height() + 50):
+                
+                center_x = screen_pos[0] + TILE_SIZE // 2
+                center_y = screen_pos[1] + TILE_SIZE // 2
+                
+                # Calculate fade effect based on age
+                fade_factor = 1.0 - (age / ping.duration)
+                alpha = int(255 * fade_factor)
+                
+                # Get ping color based on type
+                from shared.models.game_models import PingType
+                if ping.ping_type == PingType.DANGER:
+                    base_color = (255, 0, 0)  # Red
+                elif ping.ping_type == PingType.HELP:
+                    base_color = (255, 255, 0)  # Yellow
+                elif ping.ping_type == PingType.MOVE_HERE:
+                    base_color = (0, 255, 0)  # Green
+                else:  # ATTENTION
+                    base_color = (0, 150, 255)  # Blue
+                
+                # Create animated ping effect
+                ping_radius = int(20 + 10 * math.sin(age * 8))  # Pulsing animation
+                
+                # Draw outer ring
+                pygame.draw.circle(screen, (*base_color, max(50, alpha//2)), (center_x, center_y), ping_radius, 3)
+                # Draw inner circle
+                pygame.draw.circle(screen, (*base_color, alpha), (center_x, center_y), 8)
+                
+                # Draw player name who created the ping
+                font = pygame.font.Font(None, 16)
+                name_text = font.render(ping.player_name, True, (255, 255, 255, alpha))
+                name_rect = name_text.get_rect()
+                name_rect.centerx = center_x
+                name_rect.top = center_y + 25
+                
+                # Draw background for name
+                bg_rect = name_rect.inflate(4, 2)
+                pygame.draw.rect(screen, (0, 0, 0, min(200, alpha)), bg_rect)
+                screen.blit(name_text, name_rect)
     
     def _render_enemies(self, screen: pygame.Surface):
         for enemy in self.game_state.enemies.values():

@@ -6,7 +6,7 @@ echo "=========================================="
 
 
 # Find the PID of the python3 -m server.main process
-PID=$(ps -fA | grep "python3 server/main.py" | grep -v grep | awk '{print $2}')
+PID=$(ps -fA | grep -E "python3 server/main.py|python3 -m server.main" | grep -v grep | awk '{print $2}')
 
 # Check if PID was found
 if [ -n "$PID" ]; then

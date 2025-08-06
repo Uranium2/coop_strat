@@ -127,6 +127,10 @@ class GameManager:
             
             # Update enemies
             self._update_enemies()
+            
+            # Clean up expired pings
+            self._cleanup_expired_pings(current_time)
+            
             self._check_game_over()
         
         # Return state only if something changed and enough time passed for network update
@@ -419,3 +423,15 @@ class GameManager:
                         return False
         
         return True
+    
+    def _cleanup_expired_pings(self, current_time: float):
+        """Remove pings that have expired"""
+        expired_pings = []
+        for ping_id, ping in self.game_state.pings.items():
+            if current_time - ping.timestamp >= ping.duration:
+                expired_pings.append(ping_id)
+        
+        for ping_id in expired_pings:
+            del self.game_state.pings[ping_id]
+            if expired_pings:
+                self.state_changed = True

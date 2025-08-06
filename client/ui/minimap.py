@@ -7,6 +7,24 @@ class Minimap:
         self.rect = pygame.Rect(x, y, width, height)
         self.scale_x = width / MAP_WIDTH
         self.scale_y = height / MAP_HEIGHT
+    
+    def handle_click(self, mouse_pos: tuple, button: int) -> tuple:
+        """Handle mouse clicks on the minimap. Returns (world_x, world_y) if clicked, None otherwise"""
+        if not self.rect.collidepoint(mouse_pos):
+            return None
+        
+        # Convert minimap click to world coordinates
+        local_x = mouse_pos[0] - self.rect.x
+        local_y = mouse_pos[1] - self.rect.y
+        
+        world_x = local_x / self.scale_x
+        world_y = local_y / self.scale_y
+        
+        # Ensure coordinates are within map bounds
+        world_x = max(0, min(MAP_WIDTH - 1, world_x))
+        world_y = max(0, min(MAP_HEIGHT - 1, world_y))
+        
+        return (world_x, world_y, button)
         
     def render(self, screen: pygame.Surface, game_state: GameState, player_id: str, camera_x: float = 0, camera_y: float = 0, screen_width: int = 1920, screen_height: int = 1080):
         pygame.draw.rect(screen, COLORS["BLACK"], self.rect)
@@ -20,6 +38,7 @@ class Minimap:
         self._render_buildings(screen, game_state)
         self._render_heroes(screen, game_state, player_id)
         self._render_enemies(screen, game_state)
+        self._render_pings(screen, game_state)
         # Render viewport rectangle on top
         self._render_viewport_rectangle(screen, camera_x, camera_y, screen_width, screen_height)
     
@@ -106,6 +125,39 @@ class Minimap:
             mini_y = self.rect.y + int(enemy.position.y * self.scale_y)
             
             pygame.draw.circle(screen, COLORS["RED"], (mini_x, mini_y), 1)
+    
+    def _render_pings(self, screen: pygame.Surface, game_state: GameState):
+        """Render pings on the minimap"""
+        import time
+        current_time = time.time()
+        
+        for ping in game_state.pings.values():
+            # Check if ping is still active
+            age = current_time - ping.timestamp
+            if age >= ping.duration:
+                continue
+            
+            mini_x = self.rect.x + int(ping.position.x * self.scale_x)
+            mini_y = self.rect.y + int(ping.position.y * self.scale_y)
+            
+            # Calculate fade effect
+            fade_factor = 1.0 - (age / ping.duration)
+            
+            # Get ping color based on type
+            from shared.models.game_models import PingType
+            if ping.ping_type == PingType.DANGER:
+                color = (255, 0, 0)  # Red
+            elif ping.ping_type == PingType.HELP:
+                color = (255, 255, 0)  # Yellow
+            elif ping.ping_type == PingType.MOVE_HERE:
+                color = (0, 255, 0)  # Green
+            else:  # ATTENTION
+                color = (0, 150, 255)  # Blue
+            
+            # Draw ping as a small circle
+            radius = max(1, int(3 * fade_factor))
+            pygame.draw.circle(screen, color, (mini_x, mini_y), radius)
+            pygame.draw.circle(screen, COLORS["WHITE"], (mini_x, mini_y), radius, 1)
     
     def _render_viewport_rectangle(self, screen: pygame.Surface, camera_x: float, camera_y: float, screen_width: int, screen_height: int):
         """Render a red rectangle showing the current viewport area"""
