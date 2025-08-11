@@ -83,7 +83,6 @@ class ConnectionManager:
         )
         lobby = lobby_manager.get_lobby(lobby_id)
         if lobby:
-            logger.debug(f"Lobby {lobby_id} has {len(lobby.players)} players")
             for player_id in lobby.players:
                 await self.send_to_player(player_id, message)
         else:
@@ -392,6 +391,16 @@ async def handle_game_action(lobby_id: str, player_id: str, action: dict):
         else:
             logger.warning(f"Failed to build {building_type} for {player_id}")
 
+    elif action_type == "toggle_pause":
+        if game_manager.toggle_pause():
+            logger.debug(f"Game pause toggled by {player_id}")
+            updated_state = game_manager.get_game_state()
+            await manager.send_to_lobby(
+                lobby_id, {"type": "game_update", "game_state": updated_state.dict()}
+            )
+        else:
+            logger.warning(f"Failed to toggle pause for {player_id}")
+
     else:
         logger.warning(f"Unknown game action type: {action_type}")
 
@@ -426,6 +435,14 @@ async def game_loop(lobby_id: str, game_manager: GameManager):
         logger.error(f"Error in game loop for lobby {lobby_id}: {e}", exc_info=True)
     finally:
         logger.info(f"Game ended for lobby {lobby_id}")
+
+        # Reset lobby state so it can start a new game
+        lobby = lobby_manager.get_lobby(lobby_id)
+        if lobby:
+            logger.info(f"Resetting lobby {lobby_id} to allow new games")
+            lobby.is_game_active = False
+            lobby.save()
+
         if lobby_id in game_managers:
             del game_managers[lobby_id]
 

@@ -1,4 +1,5 @@
 import logging
+import random
 import time
 import uuid
 from typing import Dict, List, Optional
@@ -9,6 +10,8 @@ from server.services.pathfinding import Pathfinder
 from shared.constants.game_constants import (
     BUILDING_TYPES,
     ENEMY_SPAWN_CORNERS,
+    ENEMY_TYPES,
+    FIRST_WAVE_DELAY,
     HERO_TYPES,
     MAP_HEIGHT,
     MAP_WIDTH,
@@ -19,6 +22,7 @@ from shared.models.game_models import (
     Building,
     BuildingType,
     Enemy,
+    GameOverReason,
     GameState,
     Hero,
     MovementTarget,
@@ -49,7 +53,7 @@ class GameManager:
         )
 
         self.last_resource_tick = time.time()
-        self.last_wave_spawn = time.time()
+        self.last_wave_spawn = time.time()  # Track when last wave was spawned
         self.wave_number = 0
         self.pathfinder = Pathfinder(MAP_WIDTH, MAP_HEIGHT)
         self.enemy_paths = {}
@@ -115,12 +119,22 @@ class GameManager:
                     position=Position(x=pos_x, y=pos_y),
                     health=hero_stats["health"],
                     max_health=hero_stats["health"],
+                    attack_damage=hero_stats["attack_damage"],
+                    attack_range=hero_stats["attack_range"],
+                    speed=hero_stats["speed"],
+                    attack_speed=hero_stats["attack_speed"],
                 )
 
         # Initialize shared fog of war for all players
         self.game_state.fog_of_war = [
             [False for _ in range(MAP_WIDTH)] for _ in range(MAP_HEIGHT)
         ]
+
+        # Initialize wave timer - first wave spawns after FIRST_WAVE_DELAY
+        current_time = time.time()
+        self.game_state.wave_number = 0
+        self.game_state.next_wave_time = current_time + FIRST_WAVE_DELAY
+        self.game_state.time_to_next_wave = FIRST_WAVE_DELAY
 
         # Update vision for all players initially
         for player_id in self.game_state.players:
@@ -131,35 +145,54 @@ class GameManager:
         dt = current_time - self.last_update
         self.last_update = current_time
 
-        # Update game logic at 60 FPS
+        # Update game logic at 60 FPS - but only if not paused
         if dt >= 1.0 / self.tick_rate:
+            # Always update game time for consistency, even when paused
             self.game_state.game_time += dt
 
-            # Update hero movements
-            self._update_hero_movements(dt)
+            # Skip game logic updates if paused
+            if not self.game_state.is_paused:
+                # Update hero movements
+                self._update_hero_movements(dt)
 
-            # Resource updates every 2 seconds
-            if current_time - self.last_resource_tick >= RESOURCE_TICK_RATE:
-                self._update_resources()
-                self.last_resource_tick = current_time
-                self.state_changed = True
+                # Resource updates every 2 seconds
+                if current_time - self.last_resource_tick >= RESOURCE_TICK_RATE:
+                    self._update_resources()
+                    self.last_resource_tick = current_time
+                    self.state_changed = True
 
-            # Wave spawning
-            if current_time - self.last_wave_spawn >= WAVE_SPAWN_INTERVAL:
-                self._spawn_enemy_wave()
-                self.last_wave_spawn = current_time
-                self.state_changed = True
+                # Wave spawning system
+                self._update_wave_timer(current_time)
+                if current_time >= self.game_state.next_wave_time:
+                    logger.info(
+                        f"Wave spawn timer triggered. Current enemies: {len(self.game_state.enemies)}"
+                    )
+                    self._spawn_enemy_wave()
+                    self._schedule_next_wave(current_time)
+                    self.state_changed = True
 
-            # Update enemies
-            self._update_enemies()
-            
-            # Process combat interactions
-            self._process_combat()
+                # TEMPORARY: Spawn single test enemy near hero - DISABLED
+                # if current_time - self.last_wave_spawn >= WAVE_SPAWN_INTERVAL:
+                #     self._spawn_test_enemy()
+                #     self.last_wave_spawn = current_time
+                #     self.state_changed = True
 
-            # Clean up expired pings
+                # Update enemies
+                self._update_enemies()
+
+                # Process combat interactions
+                self._process_combat()
+
+                self._check_game_over()
+
+            # Always clean up expired pings regardless of pause state
             self._cleanup_expired_pings(current_time)
 
-            self._check_game_over()
+            # Clean up expired attack effects
+            self._cleanup_expired_attack_effects(current_time)
+
+            # Clean up dead enemies after 20 seconds
+            self._cleanup_dead_enemies(current_time)
 
         # Return state only if something changed and enough time passed for network update
         if self.state_changed and (
@@ -537,42 +570,336 @@ class GameManager:
                     return True
         return False
 
+    def _update_wave_timer(self, current_time: float):
+        """Update the wave timer countdown"""
+        self.game_state.time_to_next_wave = max(
+            0, self.game_state.next_wave_time - current_time
+        )
+
+        # Update state if timer changed significantly (every second)
+        if int(self.game_state.time_to_next_wave) != int(
+            getattr(self, "_last_timer_update", 0)
+        ):
+            self.state_changed = True
+            self._last_timer_update = self.game_state.time_to_next_wave
+
+    def _schedule_next_wave(self, current_time: float):
+        """Schedule the next wave spawn"""
+        self.game_state.next_wave_time = current_time + WAVE_SPAWN_INTERVAL
+        self.game_state.time_to_next_wave = WAVE_SPAWN_INTERVAL
+
     def _spawn_enemy_wave(self):
         self.wave_number += 1
-        enemies_per_corner = min(3 + self.wave_number // 2, 10)
+        self.game_state.wave_number = self.wave_number
+        enemies_per_corner = min(
+            1 + self.wave_number // 3, 4
+        )  # Start with 1, scale slowly
+
+        logger.info(
+            f"Spawning wave {self.wave_number} with {enemies_per_corner} enemies per corner"
+        )
+
+        # Find the actual town hall position
+        town_hall = self._find_town_hall()
+        if town_hall:
+            town_hall_target = Position(
+                x=town_hall.position.x + town_hall.size[0] / 2,
+                y=town_hall.position.y + town_hall.size[1] / 2,
+            )
+        else:
+            # Fallback to map center if no town hall found
+            town_hall_target = Position(x=MAP_WIDTH // 2, y=MAP_HEIGHT // 2)
 
         for corner in ENEMY_SPAWN_CORNERS:
             for _ in range(enemies_per_corner):
                 enemy_id = str(uuid.uuid4())
+
+                # Choose enemy type based on wave number
+                if self.wave_number <= 2:
+                    enemy_type = "BASIC"
+                elif self.wave_number <= 4:
+                    enemy_type = "FAST" if random.random() < 0.3 else "BASIC"
+                elif self.wave_number <= 6:
+                    enemy_type = random.choice(["BASIC", "FAST", "RANGED"])
+                else:
+                    enemy_type = random.choice(["BASIC", "FAST", "RANGED", "HEAVY"])
+
+                enemy_stats = ENEMY_TYPES[enemy_type]
+
+                # Scale health with wave number
+                health_scaling = self.wave_number * 3  # Less aggressive scaling
+                scaled_health = enemy_stats["health"] + health_scaling
+
+                # Add small random offset to prevent enemies from spawning at identical positions
+                spawn_x = corner[0] + random.uniform(-1, 1)
+                spawn_y = corner[1] + random.uniform(-1, 1)
+
                 self.game_state.enemies[enemy_id] = Enemy(
                     id=enemy_id,
-                    position=Position(x=corner[0], y=corner[1]),
-                    health=30 + self.wave_number * 5,
-                    max_health=30 + self.wave_number * 5,
-                    target_position=Position(x=MAP_WIDTH // 2, y=MAP_HEIGHT // 2),
+                    position=Position(x=spawn_x, y=spawn_y),
+                    health=scaled_health,
+                    max_health=scaled_health,
+                    target_position=town_hall_target,  # Target actual town hall
                     is_active=True,
+                    attack_damage=enemy_stats["attack_damage"],
+                    attack_range=enemy_stats["attack_range"],
+                    speed=enemy_stats["speed"],
+                    attack_speed=enemy_stats["attack_speed"],
                 )
 
+        logger.info(
+            f"Wave {self.wave_number} spawned: {len(ENEMY_SPAWN_CORNERS) * enemies_per_corner} total enemies targeting town hall at ({town_hall_target.x}, {town_hall_target.y})"
+        )
+
+    def _spawn_test_enemy(self):
+        """TEMPORARY: Spawn a single enemy near the first hero for combat testing"""
+        # Only spawn if we don't already have test enemies
+        if len(self.game_state.enemies) > 0:
+            return
+
+        # Find the first hero
+        if not self.game_state.heroes:
+            return
+
+        first_hero = list(self.game_state.heroes.values())[0]
+
+        # Spawn enemy 3 units away from hero
+        enemy_id = str(uuid.uuid4())
+        enemy_stats = ENEMY_TYPES["BASIC"]
+        enemy_x = first_hero.position.x + 3
+        enemy_y = first_hero.position.y + 1
+
+        self.game_state.enemies[enemy_id] = Enemy(
+            id=enemy_id,
+            position=Position(x=enemy_x, y=enemy_y),
+            health=enemy_stats["health"],
+            max_health=enemy_stats["health"],
+            target_position=None,  # No target - don't move
+            is_active=True,
+            attack_damage=enemy_stats["attack_damage"],
+            attack_range=enemy_stats["attack_range"],
+            speed=enemy_stats["speed"],
+            attack_speed=enemy_stats["attack_speed"],
+        )
+
+        # logger.info(f"Spawned test enemy at ({enemy_x}, {enemy_y}) near hero at ({first_hero.position.x}, {first_hero.position.y})")
+
     def _update_enemies(self):
-        obstacles = self._get_obstacles()
+        """Update enemy AI behavior - target town hall and attack obstacles"""
+        dt = 1.0 / self.tick_rate  # Time delta for movement calculations
+
+        if self.game_state.enemies:
+            logger.debug(f"Updating {len(self.game_state.enemies)} enemies")
 
         for enemy in self.game_state.enemies.values():
-            if enemy.is_active and enemy.target_position:
-                self._update_enemy_behavior(enemy, obstacles)
+            if not enemy.is_active or enemy.health <= 0 or enemy.is_dead:
+                logger.debug(
+                    f"Enemy {enemy.id} skipped - active:{enemy.is_active}, health:{enemy.health}, dead:{enemy.is_dead}"
+                )
+                continue
 
-    def _update_enemy_behavior(self, enemy: Enemy, obstacles: List[Position]):
-        if enemy.id not in self.enemy_paths:
-            self._find_target_for_enemy(enemy)
+            # Set target to town hall if not set or target is gone
+            if not enemy.target_position:
+                town_hall = self._find_town_hall()
+                if town_hall:
+                    enemy.target_position = Position(
+                        x=town_hall.position.x + town_hall.size[0] / 2,
+                        y=town_hall.position.y + town_hall.size[1] / 2,
+                    )
+                else:
+                    logger.warning(
+                        f"No town hall found for enemy {enemy.id} to target!"
+                    )
 
-        if enemy.id in self.enemy_paths and self.enemy_paths[enemy.id]:
-            next_pos = self.enemy_paths[enemy.id][0]
-            enemy.position = next_pos
-            self.enemy_paths[enemy.id].pop(0)
+            if enemy.target_position:
+                old_pos = (enemy.position.x, enemy.position.y)
+                self._update_enemy_behavior(enemy, dt)
+                new_pos = (enemy.position.x, enemy.position.y)
+                if old_pos != new_pos:
+                    pass
 
-            if not self.enemy_paths[enemy.id]:
-                del self.enemy_paths[enemy.id]
+        # Mark state as changed if any enemies moved/acted
+        if self.game_state.enemies:
+            self.state_changed = True
+
+    def _update_enemy_behavior(self, enemy: Enemy, dt: float):
+        """Update individual enemy behavior - move toward target and attack anything in range"""
+
+        # First check if there's any player unit or building to attack
+        target_to_attack = self._find_target_to_attack(enemy)
+
+        if target_to_attack:
+            # Attack the target instead of moving
+            self._enemy_attack_target(enemy, target_to_attack)
         else:
-            self._move_enemy_towards_target(enemy)
+            # Move toward target (town hall)
+            self._move_enemy_towards_target(enemy, dt)
+
+    def _find_target_to_attack(self, enemy: Enemy):
+        """Find any player unit or building within attack range"""
+        targets = []
+
+        # Check all player buildings (not just blocking ones)
+        for building in self.game_state.buildings.values():
+            if building.health <= 0:
+                continue
+
+            # Skip shared buildings (like town hall) initially - attack player buildings first
+            if building.player_id == "shared":
+                continue
+
+            # Calculate distance to building center
+            building_center_x = building.position.x + building.size[0] / 2
+            building_center_y = building.position.y + building.size[1] / 2
+
+            distance = self._distance(
+                enemy.position.x, enemy.position.y, building_center_x, building_center_y
+            )
+
+            # Check if building is within attack range (accounting for building size)
+            effective_range = enemy.attack_range + max(building.size) / 2
+            if distance <= effective_range:
+                targets.append(("building", building, distance))
+
+        # Check all player heroes
+        for hero in self.game_state.heroes.values():
+            if hero.health <= 0:
+                continue
+
+            distance = self._distance(
+                enemy.position.x, enemy.position.y, hero.position.x, hero.position.y
+            )
+
+            if distance <= enemy.attack_range:
+                targets.append(("hero", hero, distance))
+
+        # Check all player units
+        for unit in self.game_state.units.values():
+            if unit.health <= 0:
+                continue
+
+            distance = self._distance(
+                enemy.position.x, enemy.position.y, unit.position.x, unit.position.y
+            )
+
+            if distance <= enemy.attack_range:
+                targets.append(("unit", unit, distance))
+
+        # Attack the closest target
+        if targets:
+            targets.sort(key=lambda x: x[2])  # Sort by distance
+            return targets[0]  # Return closest target
+
+        # If no other targets, check town hall (shared buildings)
+        for building in self.game_state.buildings.values():
+            if building.health <= 0:
+                continue
+
+            if building.player_id == "shared":  # Town hall and other shared buildings
+                building_center_x = building.position.x + building.size[0] / 2
+                building_center_y = building.position.y + building.size[1] / 2
+
+                distance = self._distance(
+                    enemy.position.x,
+                    enemy.position.y,
+                    building_center_x,
+                    building_center_y,
+                )
+
+                effective_range = enemy.attack_range + max(building.size) / 2
+                if distance <= effective_range:
+                    return ("building", building, distance)
+
+        return None
+
+    def _enemy_attack_target(self, enemy: Enemy, target_info):
+        """Make enemy attack any target (building, hero, or unit)"""
+        target_type, target, distance = target_info
+
+        if target_type == "building":
+            self._enemy_attack_building(enemy, target)
+        elif target_type == "hero":
+            self._enemy_attack_hero(enemy, target)
+        elif target_type == "unit":
+            self._enemy_attack_unit(enemy, target)
+
+    def _enemy_attack_building(self, enemy: Enemy, building: Building):
+        """Make enemy attack a building"""
+        # Apply damage to the building
+        building.health = max(0, building.health - enemy.attack_damage)
+
+        # Create attack effect for visual feedback
+        attack_effect = self.combat_service.create_attack_effect(
+            attacker_id=enemy.id,
+            target_id=building.id,
+            attacker_pos=enemy.position,
+            target_pos=Position(
+                x=building.position.x + building.size[0] / 2,
+                y=building.position.y + building.size[1] / 2,
+            ),
+            damage=int(enemy.attack_damage),
+            effect_type="MELEE",  # Most enemies are melee
+        )
+
+        self.game_state.attack_effects[attack_effect.id] = attack_effect
+        self.state_changed = True
+
+        # logger.info(
+        #     f"Enemy {enemy.id} attacked building {building.building_type.value} for {enemy.attack_damage} damage. Building health: {building.health}"
+        # )
+
+        # If building is destroyed, log it
+        if building.health <= 0:
+            logger.info(f"Building {building.building_type.value} destroyed by enemy!")
+
+    def _enemy_attack_hero(self, enemy: Enemy, hero: Hero):
+        """Make enemy attack a hero"""
+        # Apply damage to the hero
+        hero.health -= enemy.attack_damage
+
+        # Create attack effect for visual feedback
+        attack_effect = self.combat_service.create_attack_effect(
+            attacker_id=enemy.id,
+            target_id=hero.id,
+            attacker_pos=enemy.position,
+            target_pos=hero.position,
+            damage=int(enemy.attack_damage),
+            effect_type="MELEE",
+        )
+
+        self.game_state.attack_effects[attack_effect.id] = attack_effect
+        self.state_changed = True
+
+        if hero.health <= 0:
+            logger.info(f"Hero {hero.hero_type.value} killed by enemy!")
+
+    def _enemy_attack_unit(self, enemy: Enemy, unit):
+        """Make enemy attack a unit"""
+        # Apply damage to the unit
+        unit.health -= enemy.attack_damage
+
+        # Create attack effect for visual feedback
+        attack_effect = self.combat_service.create_attack_effect(
+            attacker_id=enemy.id,
+            target_id=unit.id,
+            attacker_pos=enemy.position,
+            target_pos=unit.position,
+            damage=int(enemy.attack_damage),
+            effect_type="MELEE",
+        )
+
+        self.game_state.attack_effects[attack_effect.id] = attack_effect
+        self.state_changed = True
+
+        if unit.health <= 0:
+            logger.info(f"Unit {unit.unit_type.value} killed by enemy!")
+
+    def _find_town_hall(self) -> Optional[Building]:
+        """Find the town hall building"""
+        for building in self.game_state.buildings.values():
+            if building.building_type == BuildingType.TOWN_HALL and building.health > 0:
+                return building
+        return None
 
     def _find_target_for_enemy(self, enemy: Enemy):
         closest_target = None
@@ -608,7 +935,7 @@ class GameManager:
                 enemy.position.y,
                 enemy.target_position.x,
                 enemy.target_position.y,
-                self.game_state
+                self.game_state,
             )
             self.enemy_paths[enemy.id] = path
 
@@ -633,20 +960,64 @@ class GameManager:
     def _distance(self, x1: int, y1: int, x2: int, y2: int) -> float:
         return ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
 
-    def _move_enemy_towards_target(self, enemy: Enemy):
+    def _move_enemy_towards_target(self, enemy: Enemy, dt: float):
+        """Move enemy toward their target position"""
         if not enemy.target_position:
             return
 
+        # Calculate direction to target
         dx = enemy.target_position.x - enemy.position.x
         dy = enemy.target_position.y - enemy.position.y
+        distance = (dx * dx + dy * dy) ** 0.5
 
-        if abs(dx) > abs(dy):
-            enemy.position.x += 1 if dx > 0 else -1
-        elif dy != 0:
-            enemy.position.y += 1 if dy > 0 else -1
+        # Move toward target
+        move_distance = enemy.speed * dt
 
-        enemy.position.x = max(0, min(MAP_WIDTH - 1, enemy.position.x))
-        enemy.position.y = max(0, min(MAP_HEIGHT - 1, enemy.position.y))
+        if move_distance >= distance:
+            # Reached target this frame
+            enemy.position.x = enemy.target_position.x
+            enemy.position.y = enemy.target_position.y
+            self.state_changed = True
+        else:
+            # Move toward target
+            move_x = (dx / distance) * move_distance
+            move_y = (dy / distance) * move_distance
+
+            new_x = enemy.position.x + move_x
+            new_y = enemy.position.y + move_y
+
+            # Check for collisions with other enemies - use smaller collision radius for easier movement
+            collision = False
+            collision_radius = 0.2  # Reduced from 0.4 to allow easier movement
+            for other_enemy in self.game_state.enemies.values():
+                if other_enemy.id == enemy.id or other_enemy.health <= 0:
+                    continue
+                dx_other = abs(other_enemy.position.x - new_x)
+                dy_other = abs(other_enemy.position.y - new_y)
+                if dx_other < collision_radius and dy_other < collision_radius:
+                    collision = True
+                    break
+
+            if not collision:
+                enemy.position.x = new_x
+                enemy.position.y = new_y
+                self.state_changed = True
+            else:
+                # Simple collision avoidance - just move with a small random offset
+                random_offset_x = random.uniform(-0.5, 0.5)
+                random_offset_y = random.uniform(-0.5, 0.5)
+
+                new_x_offset = enemy.position.x + move_x + random_offset_x
+                new_y_offset = enemy.position.y + move_y + random_offset_y
+
+                # Apply the movement even with collision - enemies can push through
+                enemy.position.x = new_x_offset
+                enemy.position.y = new_y_offset
+                self.state_changed = True
+
+        # Ensure enemy stays within map bounds
+        enemy.position.x = max(0.5, min(MAP_WIDTH - 0.5, enemy.position.x))
+        enemy.position.y = max(0.5, min(MAP_HEIGHT - 0.5, enemy.position.y))
 
     def _update_vision(self, player_id: str):
         hero = self._get_player_hero(player_id)
@@ -683,6 +1054,9 @@ class GameManager:
 
         if town_hall and town_hall.health <= 0:
             self.game_state.is_active = False
+            self.game_state.game_over_reason = GameOverReason.TOWN_HALL_DESTROYED
+            logger.info("Game Over: Town Hall destroyed!")
+            self.state_changed = True
 
     def get_game_state(self) -> GameState:
         return self.game_state
@@ -841,43 +1215,97 @@ class GameManager:
         return True
 
     def _process_combat(self):
-        """Process combat interactions between heroes and enemies"""
-        combat_range = 1.5  # Range at which combat occurs
-        
+        """Process combat interactions between heroes and enemies, and enemies and buildings"""
+
         # Check each hero against each enemy
         for hero in self.game_state.heroes.values():
             if hero.health <= 0:
                 continue
-                
+
             for enemy in self.game_state.enemies.values():
-                if enemy.health <= 0:
+                if enemy.health <= 0 or enemy.is_dead:
                     continue
-                    
+
                 # Calculate distance between hero and enemy
                 distance = self._distance(
-                    hero.position.x, hero.position.y,
-                    enemy.position.x, enemy.position.y
+                    hero.position.x, hero.position.y, enemy.position.x, enemy.position.y
                 )
-                
+
                 # Debug logging
-                logger.debug(f"Hero at ({hero.position.x}, {hero.position.y}) vs Enemy at ({enemy.position.x}, {enemy.position.y}), distance: {distance}")
-                
-                # If in combat range, apply damage
-                if distance <= combat_range:
-                    logger.info(f"Combat! Hero vs Enemy, distance: {distance}")
+                # logger.debug(f"Hero at ({hero.position.x}, {hero.position.y}) vs Enemy at ({enemy.position.x}, {enemy.position.y}), distance: {distance}")
+
+                # Check if hero can attack enemy (use hero's attack range)
+                if distance <= hero.attack_range:
+                    # logger.info(f"Hero attacks! Hero range: {hero.attack_range}, distance: {distance}")
                     # Hero attacks enemy
-                    enemy_died = self.combat_service.apply_damage(hero, enemy)
+                    enemy_died, attack_effect = self.combat_service.apply_damage(
+                        hero, enemy
+                    )
+                    self.game_state.attack_effects[attack_effect.id] = attack_effect
                     if enemy_died:
                         enemy.health = 0
+                        enemy.is_dead = True
+                        enemy.death_time = time.time()  # Record death timestamp
                         self.state_changed = True
-                        logger.info(f"Enemy died!")
-                    
-                    # Enemy attacks hero back
-                    hero_died = self.combat_service.apply_damage(enemy, hero)
+                        logger.info("Enemy died!")
+
+                # Check if enemy can attack hero back (use enemy's attack range, only if enemy is alive)
+                if not enemy.is_dead and distance <= enemy.attack_range:
+                    logger.info(
+                        f"Enemy attacks back! Enemy range: {enemy.attack_range}, distance: {distance}"
+                    )
+                    hero_died, counter_attack_effect = self.combat_service.apply_damage(
+                        enemy, hero
+                    )
+                    self.game_state.attack_effects[counter_attack_effect.id] = (
+                        counter_attack_effect
+                    )
                     if hero_died:
                         hero.health = 0
                         self.state_changed = True
-                        logger.info(f"Hero died!")
+                        logger.info("Hero died!")
+
+        # Check enemies attacking buildings (in addition to the movement-based attacks)
+        for enemy in self.game_state.enemies.values():
+            if enemy.health <= 0 or enemy.is_dead:
+                continue
+
+            # Check if enemy can attack any building
+            for building in self.game_state.buildings.values():
+                if building.health <= 0:
+                    continue
+
+                # Calculate distance to building
+                building_center_x = building.position.x + building.size[0] / 2
+                building_center_y = building.position.y + building.size[1] / 2
+
+                distance = self._distance(
+                    enemy.position.x,
+                    enemy.position.y,
+                    building_center_x,
+                    building_center_y,
+                )
+
+                # Account for building size when checking range
+                effective_range = enemy.attack_range + max(building.size) / 2
+
+                if distance <= effective_range:
+                    # Enemy can attack building - this is handled in movement logic
+                    # to avoid double-attacking, but we log it for debugging
+                    break
+
+    def _cleanup_expired_attack_effects(self, current_time: float):
+        """Remove attack effects that have finished their animation"""
+        expired_effects = []
+        for effect_id, effect in self.game_state.attack_effects.items():
+            if current_time - effect.start_time >= effect.duration:
+                expired_effects.append(effect_id)
+
+        for effect_id in expired_effects:
+            del self.game_state.attack_effects[effect_id]
+
+        if expired_effects:
+            self.state_changed = True
 
     def _cleanup_expired_pings(self, current_time: float):
         """Remove pings that have expired"""
@@ -890,3 +1318,34 @@ class GameManager:
             del self.game_state.pings[ping_id]
             if expired_pings:
                 self.state_changed = True
+
+    def _cleanup_dead_enemies(self, current_time: float):
+        """Remove enemies that have been dead for more than 20 seconds"""
+        DEATH_CLEANUP_TIME = 20.0  # 20 seconds
+
+        expired_enemies = []
+        for enemy_id, enemy in self.game_state.enemies.items():
+            if enemy.is_dead and enemy.death_time:
+                time_since_death = current_time - enemy.death_time
+                if time_since_death >= DEATH_CLEANUP_TIME:
+                    expired_enemies.append(enemy_id)
+
+        for enemy_id in expired_enemies:
+            del self.game_state.enemies[enemy_id]
+            logger.info(
+                f"Removed dead enemy {enemy_id} after {DEATH_CLEANUP_TIME} seconds"
+            )
+
+        if expired_enemies:
+            self.state_changed = True
+
+    def toggle_pause(self) -> bool:
+        """Toggle the pause state of the game"""
+        try:
+            self.game_state.is_paused = not self.game_state.is_paused
+            self.state_changed = True
+            logger.info(f"Game pause toggled to: {self.game_state.is_paused}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to toggle pause: {e}")
+            return False
