@@ -21,3 +21,26 @@
 - **Logging**: Use structured logging with logger = logging.getLogger(__name__)
 - **Error Handling**: Log errors with exc_info=True; graceful degradation for network issues
 - **Structure**: Keep related functionality in services/; shared models in shared/models/
+
+---
+
+## Task Responsibility Matrix
+
+| Task                        | Server Responsibility         | Client Responsibility         | Notes / Agent Guidance                                                                |
+|-----------------------------|-------------------------------|-------------------------------|---------------------------------------------------------------------------------------|
+| Physics & Collision         | ✅ Authoritative              | Optional local prediction    | Server is source of truth; client may predict for responsiveness, but server corrects |
+| AI & NPC Behavior           | ✅ Authoritative              | ❌                           | All AI logic runs on server; client receives updates only.                            |
+| Game Rules (damage, win)    | ✅ Authoritative              | ❌                           | Server enforces all rules; client displays results.                                   |
+| Player Input Handling       | ✅ Validated                  | ✅ Predicted locally         | Client predicts for responsiveness; server validates and corrects as needed.          |
+| Rendering                   | ❌                            | ✅                           | All rendering is client-side only.                                                    |
+| Sound Effects               | ❌                            | ✅                           | All sound is client-side only.                                                        |
+| UI Logic                    | ❌                            | ✅                           | All UI logic is client-side only.                                                     |
+
+### Agent Assignment Guidance
+
+- **Server Agents**: Implement all authoritative logic (physics, AI, rules, input validation).
+- **Client Agents**: Implement prediction, rendering, sound, and UI logic.
+- **Shared Models**: Use shared/models/ for data structures passed between server and client.
+- **Networking**: Ensure all authoritative decisions are communicated from server to client; client-side predictions must be correctable by server responses.
+
+---

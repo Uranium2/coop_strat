@@ -3,6 +3,7 @@ import time
 import uuid
 from typing import Dict, List, Optional
 
+from server.services.combat_service import CombatService
 from server.services.map_generator import MapGenerator
 from server.services.pathfinding import Pathfinder
 from shared.constants.game_constants import (
@@ -52,6 +53,7 @@ class GameManager:
         self.wave_number = 0
         self.pathfinder = Pathfinder(MAP_WIDTH, MAP_HEIGHT)
         self.enemy_paths = {}
+        self.combat_service = CombatService()
 
         # Movement and tick system
         self.hero_targets: Dict[
@@ -150,6 +152,9 @@ class GameManager:
 
             # Update enemies
             self._update_enemies()
+            
+            # Process combat interactions
+            self._process_combat()
 
             # Clean up expired pings
             self._cleanup_expired_pings(current_time)
@@ -598,8 +603,12 @@ class GameManager:
         if closest_target:
             enemy.target_position = closest_target
             obstacles = self._get_obstacles()
-            path = self.pathfinding.find_path(
-                enemy.position, enemy.target_position, obstacles
+            path = self.pathfinder.find_path(
+                enemy.position.x,
+                enemy.position.y,
+                enemy.target_position.x,
+                enemy.target_position.y,
+                self.game_state
             )
             self.enemy_paths[enemy.id] = path
 
@@ -830,6 +839,45 @@ class GameManager:
                         return False
 
         return True
+
+    def _process_combat(self):
+        """Process combat interactions between heroes and enemies"""
+        combat_range = 1.5  # Range at which combat occurs
+        
+        # Check each hero against each enemy
+        for hero in self.game_state.heroes.values():
+            if hero.health <= 0:
+                continue
+                
+            for enemy in self.game_state.enemies.values():
+                if enemy.health <= 0:
+                    continue
+                    
+                # Calculate distance between hero and enemy
+                distance = self._distance(
+                    hero.position.x, hero.position.y,
+                    enemy.position.x, enemy.position.y
+                )
+                
+                # Debug logging
+                logger.debug(f"Hero at ({hero.position.x}, {hero.position.y}) vs Enemy at ({enemy.position.x}, {enemy.position.y}), distance: {distance}")
+                
+                # If in combat range, apply damage
+                if distance <= combat_range:
+                    logger.info(f"Combat! Hero vs Enemy, distance: {distance}")
+                    # Hero attacks enemy
+                    enemy_died = self.combat_service.apply_damage(hero, enemy)
+                    if enemy_died:
+                        enemy.health = 0
+                        self.state_changed = True
+                        logger.info(f"Enemy died!")
+                    
+                    # Enemy attacks hero back
+                    hero_died = self.combat_service.apply_damage(enemy, hero)
+                    if hero_died:
+                        hero.health = 0
+                        self.state_changed = True
+                        logger.info(f"Hero died!")
 
     def _cleanup_expired_pings(self, current_time: float):
         """Remove pings that have expired"""

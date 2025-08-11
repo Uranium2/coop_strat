@@ -56,7 +56,19 @@ COLORS = {
 FOG_COLOR = (50, 50, 50, 180)
 VISION_RADIUS = 5
 
-WAVE_SPAWN_INTERVAL = 120
+# Combat constants
+ARMOR_REDUCTION_FACTOR = 0.02
+MAGIC_RESIST_FACTOR = 0.02
+CRITICAL_CHANCE = 0.1
+CRITICAL_MULTIPLIER = 1.5
+DAMAGE_VARIANCE = 0.2
+
+# Enemy types
+ENEMY_TYPES = {
+    "BASIC": {"health": 30, "speed": 1.5, "attack_damage": 10, "armor": 0, "magic_resist": 0}
+}
+
+WAVE_SPAWN_INTERVAL = 5
 ENEMY_SPAWN_CORNERS = [
     (0, 0),
     (MAP_WIDTH - 1, 0),
