@@ -48,6 +48,12 @@ class TileType(str, Enum):
     WALL = "WALL"
 
 
+class GameOverReason(str, Enum):
+    NONE = "NONE"
+    TOWN_HALL_DESTROYED = "TOWN_HALL_DESTROYED"
+    VICTORY = "VICTORY"
+
+
 class Position(BaseModel):
     x: float
     y: float
@@ -68,6 +74,10 @@ class Hero(BaseModel):
     position: Position
     health: int
     max_health: int
+    attack_damage: float = 10.0
+    attack_range: float = 1.0
+    speed: float = 2.0
+    attack_speed: float = 1.0
 
 
 class Building(BaseModel):
@@ -97,6 +107,12 @@ class Enemy(BaseModel):
     max_health: int
     target_position: Optional[Position] = None
     is_active: bool = False
+    attack_damage: float = 10.0
+    attack_range: float = 1.0
+    speed: float = 1.0
+    attack_speed: float = 1.0
+    is_dead: bool = False
+    death_time: Optional[float] = None
 
 
 class Player(BaseModel):
@@ -141,6 +157,24 @@ class Ping(BaseModel):
     duration: float = 5.0  # How long the ping lasts in seconds
 
 
+class AttackEffectType(str, Enum):
+    MELEE = "MELEE"
+    RANGED = "RANGED"
+    MAGIC = "MAGIC"
+
+
+class AttackEffect(BaseModel):
+    id: str
+    attacker_id: str
+    target_id: str
+    effect_type: AttackEffectType
+    start_position: Position
+    end_position: Position
+    start_time: float
+    duration: float
+    damage: int
+
+
 class GameState(BaseModel):
     lobby_id: str = ""
     players: Dict[str, Player]
@@ -149,10 +183,16 @@ class GameState(BaseModel):
     units: Dict[str, Unit]
     enemies: Dict[str, Enemy]
     pings: Dict[str, Ping] = {}
+    attack_effects: Dict[str, AttackEffect] = {}
     map_data: List[List[TileType]]
     fog_of_war: List[List[bool]]
     game_time: float
     is_active: bool = False
+    is_paused: bool = False
+    game_over_reason: GameOverReason = GameOverReason.NONE
+    wave_number: int = 0
+    next_wave_time: float = 0.0  # Time when next wave will spawn
+    time_to_next_wave: float = 0.0  # Countdown to next wave in seconds
 
 
 class MapTile(BaseModel):

@@ -17,7 +17,7 @@ from shared.constants.game_constants import (
     MAP_WIDTH,
     TILE_SIZE,
 )
-from shared.models.game_models import GameState, TileType
+from shared.models.game_models import GameOverReason, GameState, TileType
 
 
 class GameScene:
@@ -77,6 +77,15 @@ class GameScene:
         # Track CTRL key state for ping menu
         self.ctrl_pressed = False
 
+        # ESC menu state
+        self.esc_menu_open = False
+        self.esc_menu_buttons = {
+            "continue": pygame.Rect(400, 250, 200, 50),
+            "quit_to_menu": pygame.Rect(400, 320, 200, 50),
+        }
+        self.font = pygame.font.Font(None, 36)
+        self.small_font = pygame.font.Font(None, 24)
+
         self.fog_surface = pygame.Surface(
             (MAP_WIDTH * TILE_SIZE, MAP_HEIGHT * TILE_SIZE), pygame.SRCALPHA
         )
@@ -104,10 +113,10 @@ class GameScene:
                     self.radial_ping_menu.deactivate()
                 elif self.build_mode:
                     self.build_mode = None
+                elif self.esc_menu_open:
+                    self._close_esc_menu()
                 else:
-                    from client.scenes.menu_scene import MenuScene
-
-                    self.next_scene = MenuScene(self.screen, self.network_manager)
+                    self._open_esc_menu()
             elif event.key == pygame.K_LCTRL or event.key == pygame.K_RCTRL:
                 self.ctrl_pressed = True
                 # Activate radial ping menu immediately at mouse position
@@ -121,6 +130,11 @@ class GameScene:
                 and hasattr(self.selected_entity, "hero_type")
             ):
                 self.build_mode = self.build_keys[event.key]
+            elif event.key == pygame.K_SPACE:
+                # Toggle pause
+                asyncio.create_task(
+                    self.network_manager.send_game_action({"type": "toggle_pause"})
+                )
             elif event.key in self.keys_pressed:
                 self.keys_pressed[event.key] = True
 
@@ -148,6 +162,19 @@ class GameScene:
                 self.radial_ping_menu.update_hover(event.pos)
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
+            # Handle ESC menu clicks first
+            if self.esc_menu_open and event.button == 1:
+                if self.esc_menu_buttons["continue"].collidepoint(event.pos):
+                    self._close_esc_menu()
+                    return
+                elif self.esc_menu_buttons["quit_to_menu"].collidepoint(event.pos):
+                    self._quit_to_menu()
+                    return
+                # If clicked outside ESC menu, close it
+                elif not self._is_click_in_esc_menu(event.pos):
+                    self._close_esc_menu()
+                    return
+
             # Check if ping menu is active and handle selection
             if self.radial_ping_menu.is_active and event.button == 1:
                 selected_ping = self.radial_ping_menu.get_selected_ping(event.pos)
@@ -209,6 +236,16 @@ class GameScene:
             ) ** 0.5
             if distance <= 2:
                 self.selected_entity = hero
+                return
+
+        # Check for enemy selection
+        for enemy in self.game_state.enemies.values():
+            distance = (
+                (enemy.position.x - world_pos[0]) ** 2
+                + (enemy.position.y - world_pos[1]) ** 2
+            ) ** 0.5
+            if distance <= 2:
+                self.selected_entity = enemy
                 return
 
         for building in self.game_state.buildings.values():
@@ -482,8 +519,83 @@ class GameScene:
         return True
 
     def _on_game_update(self, data):
+        import time
+
+        timestamp = time.time()
+        print(
+            f"[DEBUG {timestamp:.3f}] Received game update data keys: {list(data.keys())}"
+        )
+        if "game_state" in data:
+            print(
+                f"[DEBUG {timestamp:.3f}] Game state keys: {list(data['game_state'].keys())}"
+            )
+            print(
+                f"[DEBUG {timestamp:.3f}] is_active in data: {'is_active' in data['game_state']}"
+            )
+            print(
+                f"[DEBUG {timestamp:.3f}] game_over_reason in data: {'game_over_reason' in data['game_state']}"
+            )
+            if "is_active" in data["game_state"]:
+                is_active_value = data["game_state"]["is_active"]
+                print(f"[DEBUG {timestamp:.3f}] is_active value: {is_active_value}")
+                if not is_active_value:
+                    print(
+                        f"[DEBUG {timestamp:.3f}] *** RECEIVED is_active=False FROM SERVER ***"
+                    )
+            if "game_over_reason" in data["game_state"]:
+                game_over_value = data["game_state"]["game_over_reason"]
+                print(
+                    f"[DEBUG {timestamp:.3f}] game_over_reason value: {game_over_value}"
+                )
+                if game_over_value != "NONE":
+                    print(
+                        f"[DEBUG {timestamp:.3f}] *** RECEIVED game_over_reason={game_over_value} FROM SERVER ***"
+                    )
+
         self.game_state = GameState(**data["game_state"])
         self._update_fog_of_war()
+
+        # Check for game over conditions
+        print(
+            f"[DEBUG {timestamp:.3f}] After GameState creation - is_active: {self.game_state.is_active}"
+        )
+        print(
+            f"[DEBUG {timestamp:.3f}] After GameState creation - game_over_reason: {self.game_state.game_over_reason}"
+        )
+
+        if not self.game_state.is_active:
+            print(f"[DEBUG {timestamp:.3f}] *** GAME OVER DETECTED *** is_active=False")
+            # Check if we have a game over reason
+            game_over_reason = self.game_state.game_over_reason
+            print(
+                f"[DEBUG {timestamp:.3f}] Game over reason: {game_over_reason} (type: {type(game_over_reason)})"
+            )
+            if game_over_reason != GameOverReason.NONE:
+                print(
+                    f"[DEBUG {timestamp:.3f}] Creating GameOverScene with reason: {game_over_reason}"
+                )
+                from client.scenes.game_over_scene import GameOverScene
+
+                self.next_scene = GameOverScene(
+                    self.screen, self.network_manager, game_over_reason.value
+                )
+                print(
+                    f"[DEBUG {timestamp:.3f}] GameOverScene created and set as next_scene"
+                )
+            else:
+                # Fallback for generic game over
+                print(
+                    "[DEBUG] Game over with NONE reason - creating generic GameOverScene"
+                )
+                from client.scenes.game_over_scene import GameOverScene
+
+                self.next_scene = GameOverScene(
+                    self.screen, self.network_manager, "NONE"
+                )
+        else:
+            print(
+                f"[DEBUG] Game is still active (is_active={self.game_state.is_active})"
+            )
 
     def _on_hero_moved(self, data):
         pass
@@ -508,11 +620,13 @@ class GameScene:
                     pygame.draw.rect(self.fog_surface, (0, 0, 0, 0), fog_rect)
 
     def update(self, dt: float):
-        # Handle continuous arrow key camera movement
-        self._handle_continuous_camera_movement()
+        # Don't update camera movement when ESC menu is open
+        if not self.esc_menu_open:
+            # Handle continuous arrow key camera movement
+            self._handle_continuous_camera_movement()
 
-        # Handle mouse edge scrolling
-        self._handle_mouse_edge_scrolling()
+            # Handle mouse edge scrolling
+            self._handle_mouse_edge_scrolling()
 
     def render(self, screen: pygame.Surface):
         screen.fill(COLORS["BLACK"])
@@ -525,6 +639,8 @@ class GameScene:
         self._render_heroes(screen)
         # Render pings on top of everything else in the game world
         self._render_pings(screen)
+        # Render attack effects on top of everything else
+        self._render_attack_effects(screen)
 
         current_player = self.game_state.players.get(self.network_manager.player_id)
         if current_player:
@@ -552,6 +668,14 @@ class GameScene:
         # Render lobby ID at the top of the screen
         self._render_lobby_info(screen)
 
+        # Render pause indicator if game is paused
+        if self.game_state.is_paused:
+            self._render_pause_indicator(screen)
+
+        # Render ESC menu on top of everything if open
+        if self.esc_menu_open:
+            self._render_esc_menu(screen)
+
     def _render_build_info(self, screen: pygame.Surface):
         font = pygame.font.Font(None, 24)
         text = f"Build Mode: {self.build_mode} (Right-click to cancel)"
@@ -561,24 +685,76 @@ class GameScene:
     def _render_lobby_info(self, screen: pygame.Surface):
         font = pygame.font.Font(None, 24)
         lobby_id = getattr(self.game_state, "lobby_id", "Unknown")
+
+        # Get spawn timer info
+        wave_number = getattr(self.game_state, "wave_number", 0)
+        time_to_next_wave = getattr(self.game_state, "time_to_next_wave", 0)
+
         if lobby_id:
             # Display lobby ID at the top center of screen
-            text = (
+            lobby_text = (
                 f"Lobby: {lobby_id[:12]}..."
                 if len(lobby_id) > 15
                 else f"Lobby: {lobby_id}"
             )
-            text_surface = font.render(text, True, COLORS["CYAN"])
-            text_rect = text_surface.get_rect()
-            text_rect.centerx = screen.get_width() // 2
-            text_rect.y = 10
 
-            # Draw background for better visibility
-            bg_rect = text_rect.inflate(20, 10)
-            pygame.draw.rect(screen, (0, 0, 0, 128), bg_rect)
-            pygame.draw.rect(screen, COLORS["WHITE"], bg_rect, 1)
+            # Format spawn timer
+            if time_to_next_wave > 0:
+                minutes = int(time_to_next_wave // 60)
+                seconds = int(time_to_next_wave % 60)
+                if wave_number == 0:
+                    timer_text = f"First Wave: {minutes:02d}:{seconds:02d}"
+                else:
+                    timer_text = f"Next Wave: {minutes:02d}:{seconds:02d}"
+            else:
+                if wave_number == 0:
+                    timer_text = "First Wave: Starting..."
+                else:
+                    timer_text = "Next Wave: Starting..."
 
-            screen.blit(text_surface, text_rect)
+            # Render both texts
+            lobby_surface = font.render(lobby_text, True, COLORS["CYAN"])
+            timer_surface = font.render(timer_text, True, COLORS["YELLOW"])
+
+            # Position lobby ID
+            lobby_rect = lobby_surface.get_rect()
+            lobby_rect.centerx = (
+                screen.get_width() // 2 - 100
+            )  # Move left to make room for timer
+            lobby_rect.y = 10
+
+            # Position timer next to lobby ID
+            timer_rect = timer_surface.get_rect()
+            timer_rect.centerx = screen.get_width() // 2 + 100  # Move right
+            timer_rect.y = 10
+
+            # Draw backgrounds for better visibility
+            lobby_bg_rect = lobby_rect.inflate(20, 10)
+            timer_bg_rect = timer_rect.inflate(20, 10)
+
+            pygame.draw.rect(screen, (0, 0, 0, 128), lobby_bg_rect)
+            pygame.draw.rect(screen, COLORS["WHITE"], lobby_bg_rect, 1)
+
+            pygame.draw.rect(screen, (0, 0, 0, 128), timer_bg_rect)
+            pygame.draw.rect(screen, COLORS["WHITE"], timer_bg_rect, 1)
+
+            screen.blit(lobby_surface, lobby_rect)
+            screen.blit(timer_surface, timer_rect)
+
+    def _render_pause_indicator(self, screen: pygame.Surface):
+        """Render the pause indicator in the top right corner"""
+        font = pygame.font.Font(None, 36)
+        text = "PAUSED"
+        text_surface = font.render(text, True, COLORS["YELLOW"])
+        text_rect = text_surface.get_rect()
+        text_rect.topright = (screen.get_width() - 20, 20)
+
+        # Draw background for better visibility
+        bg_rect = text_rect.inflate(20, 10)
+        pygame.draw.rect(screen, (0, 0, 0, 180), bg_rect)
+        pygame.draw.rect(screen, COLORS["YELLOW"], bg_rect, 2)
+
+        screen.blit(text_surface, text_rect)
 
     def _is_tile_explored(self, x: int, y: int) -> bool:
         """Check if a tile has been explored (visible through fog of war)"""
@@ -749,6 +925,88 @@ class GameScene:
                 pygame.draw.rect(screen, (0, 0, 0, min(200, alpha)), bg_rect)
                 screen.blit(name_text, name_rect)
 
+    def _render_attack_effects(self, screen: pygame.Surface):
+        """Render attack effects/animations"""
+        import time
+
+        current_time = time.time()
+
+        for effect in self.game_state.attack_effects.values():
+            # Check if effect is still active
+            age = current_time - effect.start_time
+            if age >= effect.duration:
+                continue
+
+            # Calculate animation progress (0.0 to 1.0)
+            progress = age / effect.duration
+
+            start_screen_pos = self._world_to_screen(
+                (effect.start_position.x, effect.start_position.y)
+            )
+            end_screen_pos = self._world_to_screen(
+                (effect.end_position.x, effect.end_position.y)
+            )
+
+            # Only render if on screen
+            if (
+                -50 < start_screen_pos[0] < screen.get_width() + 50
+                and -50 < start_screen_pos[1] < screen.get_height() + 50
+            ) or (
+                -50 < end_screen_pos[0] < screen.get_width() + 50
+                and -50 < end_screen_pos[1] < screen.get_height() + 50
+            ):
+                start_x = start_screen_pos[0] + TILE_SIZE // 2
+                start_y = start_screen_pos[1] + TILE_SIZE // 2
+                end_x = end_screen_pos[0] + TILE_SIZE // 2
+                end_y = end_screen_pos[1] + TILE_SIZE // 2
+
+                if effect.effect_type.value == "MELEE":
+                    # Melee attack: flash effect at target position
+                    alpha = int(255 * (1.0 - progress))
+                    flash_color = (255, 255, 100, alpha)
+                    pygame.draw.circle(
+                        screen, flash_color, (end_x, end_y), int(20 * (1.0 - progress))
+                    )
+
+                elif effect.effect_type.value == "RANGED":
+                    # Ranged attack: projectile traveling from start to end
+                    current_x = int(start_x + (end_x - start_x) * progress)
+                    current_y = int(start_y + (end_y - start_y) * progress)
+                    pygame.draw.circle(
+                        screen, COLORS["YELLOW"], (current_x, current_y), 3
+                    )
+                    # Draw arrow trail
+                    if progress > 0.1:
+                        trail_length = 10
+                        trail_x = int(current_x - (end_x - start_x) * 0.1)
+                        trail_y = int(current_y - (end_y - start_y) * 0.1)
+                        pygame.draw.line(
+                            screen,
+                            COLORS["ORANGE"],
+                            (trail_x, trail_y),
+                            (current_x, current_y),
+                            2,
+                        )
+
+                elif effect.effect_type.value == "MAGIC":
+                    # Magic attack: expanding magical effect
+                    alpha = int(255 * (1.0 - progress))
+                    magic_color = (150, 100, 255, alpha)
+                    radius = int(15 + 10 * progress)
+                    pygame.draw.circle(screen, magic_color, (end_x, end_y), radius, 2)
+                    # Add sparkle effect
+                    for i in range(5):
+                        angle = (progress * 360 + i * 72) % 360
+                        sparkle_x = int(
+                            end_x + math.cos(math.radians(angle)) * radius * 0.7
+                        )
+                        sparkle_y = int(
+                            end_y + math.sin(math.radians(angle)) * radius * 0.7
+                        )
+                        pygame.draw.circle(
+                            screen, (255, 255, 255, alpha), (sparkle_x, sparkle_y), 2
+                        )
+
     def _render_enemies(self, screen: pygame.Surface):
         for enemy in self.game_state.enemies.values():
             screen_pos = self._world_to_screen((enemy.position.x, enemy.position.y))
@@ -759,11 +1017,22 @@ class GameScene:
             ):
                 center_x = screen_pos[0] + TILE_SIZE // 2
                 center_y = screen_pos[1] + TILE_SIZE // 2
+
+                # Choose color based on dead state
+                if enemy.is_dead:
+                    # Dead enemy: dark grey-red color
+                    enemy_color = (80, 40, 40)  # Dark grey-red
+                    border_color = (120, 60, 60)  # Slightly lighter grey-red
+                else:
+                    # Alive enemy: normal red
+                    enemy_color = COLORS["RED"]
+                    border_color = COLORS["WHITE"]
+
                 pygame.draw.circle(
-                    screen, COLORS["RED"], (center_x, center_y), TILE_SIZE // 4
+                    screen, enemy_color, (center_x, center_y), TILE_SIZE // 4
                 )
                 pygame.draw.circle(
-                    screen, COLORS["WHITE"], (center_x, center_y), TILE_SIZE // 4, 1
+                    screen, border_color, (center_x, center_y), TILE_SIZE // 4, 1
                 )
 
     def _render_fog_of_war(self, screen: pygame.Surface):
@@ -775,8 +1044,79 @@ class GameScene:
         )
         screen.blit(self.fog_surface, fog_rect)
 
+    def _open_esc_menu(self):
+        """Open the ESC menu and pause the game"""
+        self.esc_menu_open = True
+        # Send pause request to server
+        asyncio.create_task(
+            self.network_manager.send_game_action({"type": "toggle_pause"})
+        )
+
+    def _close_esc_menu(self):
+        """Close the ESC menu and unpause the game"""
+        self.esc_menu_open = False
+        # Send unpause request to server (if game is paused)
+        if self.game_state.is_paused:
+            asyncio.create_task(
+                self.network_manager.send_game_action({"type": "toggle_pause"})
+            )
+
+    def _quit_to_menu(self):
+        """Quit to main menu"""
+        from client.scenes.menu_scene import MenuScene
+
+        self.next_scene = MenuScene(self.screen, self.network_manager)
+
+    def _is_click_in_esc_menu(self, pos: tuple) -> bool:
+        """Check if click is within the ESC menu area"""
+        menu_rect = pygame.Rect(350, 200, 300, 200)
+        return menu_rect.collidepoint(pos)
+
+    def _render_esc_menu(self, screen: pygame.Surface):
+        """Render the ESC menu overlay"""
+        # Semi-transparent overlay
+        overlay = pygame.Surface((screen.get_width(), screen.get_height()))
+        overlay.set_alpha(128)
+        overlay.fill(COLORS["BLACK"])
+        screen.blit(overlay, (0, 0))
+
+        # Menu background
+        menu_rect = pygame.Rect(350, 200, 300, 200)
+        pygame.draw.rect(screen, COLORS["DARK_GRAY"], menu_rect)
+        pygame.draw.rect(screen, COLORS["WHITE"], menu_rect, 3)
+
+        # Title
+        title_text = self.font.render("PAUSED", True, COLORS["WHITE"])
+        title_rect = title_text.get_rect(center=(500, 230))
+        screen.blit(title_text, title_rect)
+
+        # Continue button
+        continue_color = COLORS["GREEN"]
+        pygame.draw.rect(screen, continue_color, self.esc_menu_buttons["continue"])
+        pygame.draw.rect(screen, COLORS["WHITE"], self.esc_menu_buttons["continue"], 2)
+        continue_text = self.small_font.render("Continue", True, COLORS["WHITE"])
+        continue_rect = continue_text.get_rect(
+            center=self.esc_menu_buttons["continue"].center
+        )
+        screen.blit(continue_text, continue_rect)
+
+        # Quit to menu button
+        quit_color = COLORS["RED"]
+        pygame.draw.rect(screen, quit_color, self.esc_menu_buttons["quit_to_menu"])
+        pygame.draw.rect(
+            screen, COLORS["WHITE"], self.esc_menu_buttons["quit_to_menu"], 2
+        )
+        quit_text = self.small_font.render("Quit to Menu", True, COLORS["WHITE"])
+        quit_rect = quit_text.get_rect(
+            center=self.esc_menu_buttons["quit_to_menu"].center
+        )
+        screen.blit(quit_text, quit_rect)
+
     def get_next_scene(self) -> Optional["MenuScene"]:
         if self.next_scene:
+            print(
+                f"[DEBUG] get_next_scene called - returning: {type(self.next_scene).__name__}"
+            )
             next_scene = self.next_scene
             self.next_scene = None
             return next_scene
