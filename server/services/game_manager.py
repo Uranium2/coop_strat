@@ -21,6 +21,10 @@ from shared.constants.game_constants import (
 from shared.models.game_models import (
     Building,
     BuildingType,
+    BuildingCategory,
+    ResourceBuilding,
+    DefensiveBuilding,
+    UpgradeBuilding,
     Enemy,
     GameOverReason,
     GameState,
@@ -29,6 +33,7 @@ from shared.models.game_models import (
     Player,
     Position,
     Resources,
+    ResourceType,
     TargetType,
     TileType,
 )
@@ -154,6 +159,9 @@ class GameManager:
             if not self.game_state.is_paused:
                 # Update hero movements
                 self._update_hero_movements(dt)
+
+                # Update buildings (construction, resource generation, defensive attacks)
+                self._update_buildings(current_time)
 
                 # Resource updates every 2 seconds
                 if current_time - self.last_resource_tick >= RESOURCE_TICK_RATE:
@@ -561,13 +569,85 @@ class GameManager:
     def _has_nearby_resource(self, position: Position, resource_type: TileType) -> bool:
         for dx in range(-2, 3):
             for dy in range(-2, 3):
-                x, y = position.x + dx, position.y + dy
+                x, y = int(position.x + dx), int(position.y + dy)
                 if (
                     0 <= x < MAP_WIDTH
                     and 0 <= y < MAP_HEIGHT
                     and self.game_state.map_data[y][x] == resource_type
                 ):
                     return True
+        return False
+
+    def _update_buildings(self, current_time: float):
+        """Update all buildings: construction, resource generation, defensive attacks"""
+        for building in list(self.game_state.buildings.values()):
+            # Handle construction completion
+            if not building.is_constructed:
+                if current_time >= building.last_tick_time + building.construction_time:
+                    building.is_constructed = True
+                    self.state_changed = True
+                    logger.info(f"Building {building.building_type} construction completed")
+                continue
+            
+            # Handle resource buildings
+            if isinstance(building, ResourceBuilding):
+                if current_time - building.last_tick_time >= building.tick_interval:
+                    self._generate_resources(building, current_time)
+                    building.last_tick_time = current_time
+                    self.state_changed = True
+            
+            # Handle defensive buildings
+            elif isinstance(building, DefensiveBuilding):
+                self._update_defensive_building(building, current_time)
+
+    def _generate_resources(self, building: ResourceBuilding, current_time: float):
+        """Generate resources for a resource building"""
+        player = self.game_state.players.get(building.player_id)
+        if not player:
+            return
+            
+        resource_type = building.resource_type.value
+        current_amount = getattr(player.resources, resource_type, 0)
+        setattr(player.resources, resource_type, current_amount + building.resource_per_tick)
+        
+        logger.debug(f"Generated {building.resource_per_tick} {resource_type} for player {building.player_id}")
+
+    def _update_defensive_building(self, building: DefensiveBuilding, current_time: float):
+        """Update defensive building attacks"""
+        if current_time - building.last_attack_time < (1.0 / building.attack_speed):
+            return
+            
+        # Find enemies in range
+        target_enemy = None
+        closest_distance = float('inf')
+        
+        for enemy in self.game_state.enemies.values():
+            if enemy.is_dead:
+                continue
+                
+            distance = self._distance(
+                building.position.x, building.position.y,
+                enemy.position.x, enemy.position.y
+            )
+            
+            if distance <= building.attack_range and distance < closest_distance:
+                target_enemy = enemy
+                closest_distance = distance
+        
+        # Attack the closest enemy
+        if target_enemy:
+            damage = building.attack_damage
+            target_enemy.health = max(0, target_enemy.health - int(damage))
+            building.last_attack_time = current_time
+            
+            logger.debug(f"Defensive building {building.building_type} attacked enemy {target_enemy.id} for {damage} damage")
+            
+            if target_enemy.health <= 0:
+                target_enemy.is_dead = True
+                target_enemy.death_time = current_time
+                logger.info(f"Enemy {target_enemy.id} killed by defensive building")
+            
+            self.state_changed = True
         return False
 
     def _update_wave_timer(self, current_time: float):
@@ -1170,16 +1250,73 @@ class GameManager:
         self._deduct_resources(player, cost)
 
         building_id = str(uuid.uuid4())
-        self.game_state.buildings[building_id] = Building(
-            id=building_id,
-            building_type=building_type,
-            position=position,
-            health=building_info["health"],
-            max_health=building_info["health"],
-            player_id=player_id,
-            size=building_info["size"],
-        )
-
+        
+        # Create the appropriate building type based on category
+        category = building_info.get("category", "SPECIAL")
+        current_time = time.time()
+        
+        if category == "RESOURCE":
+            building = ResourceBuilding(
+                id=building_id,
+                building_type=building_type,
+                position=position,
+                health=building_info["health"],
+                max_health=building_info["health"],
+                player_id=player_id,
+                size=building_info["size"],
+                construction_time=building_info.get("construction_time", 0.0),
+                is_constructed=building_info.get("construction_time", 0.0) == 0.0,
+                last_tick_time=current_time,
+                resource_type=ResourceType(building_info["resource_type"]),
+                resource_per_tick=building_info["resource_per_tick"],
+                tick_interval=building_info.get("tick_interval", 30.0),
+            )
+        elif category == "DEFENSIVE":
+            building = DefensiveBuilding(
+                id=building_id,
+                building_type=building_type,
+                position=position,
+                health=building_info["health"],
+                max_health=building_info["health"],
+                player_id=player_id,
+                size=building_info["size"],
+                construction_time=building_info.get("construction_time", 0.0),
+                is_constructed=building_info.get("construction_time", 0.0) == 0.0,
+                last_tick_time=current_time,
+                attack_damage=building_info["attack_damage"],
+                attack_range=building_info["attack_range"],
+                attack_speed=building_info["attack_speed"],
+                last_attack_time=current_time,
+            )
+        elif category == "UPGRADE":
+            building = UpgradeBuilding(
+                id=building_id,
+                building_type=building_type,
+                position=position,
+                health=building_info["health"],
+                max_health=building_info["health"],
+                player_id=player_id,
+                size=building_info["size"],
+                construction_time=building_info.get("construction_time", 0.0),
+                is_constructed=building_info.get("construction_time", 0.0) == 0.0,
+                last_tick_time=current_time,
+                available_upgrades=building_info.get("available_upgrades", []),
+            )
+        else:  # SPECIAL (Town Hall, Wall)
+            building = Building(
+                id=building_id,
+                building_type=building_type,
+                position=position,
+                health=building_info["health"],
+                max_health=building_info["health"],
+                player_id=player_id,
+                size=building_info["size"],
+                construction_time=building_info.get("construction_time", 0.0),
+                is_constructed=building_info.get("construction_time", 0.0) == 0.0,
+                last_tick_time=current_time,
+            )
+        
+        self.game_state.buildings[building_id] = building
         return True
 
     def _can_afford(self, player: Player, cost: Dict[str, int]) -> bool:

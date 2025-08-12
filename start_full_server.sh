@@ -18,7 +18,7 @@ fi
 
 # Initialize conda for bash
 eval "$(conda shell.bash hook)"
-conda activate your_env_name  # <<< Replace with your environment name
+conda activate game  # <<< Replace with your environment name
 
 # Check if Redis is running
 if ! redis-cli ping > /dev/null 2>&1; then

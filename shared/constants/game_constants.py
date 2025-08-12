@@ -42,23 +42,145 @@ HERO_TYPES = {
 }
 
 BUILDING_TYPES = {
-    "TOWN_HALL": {"health": 1000, "cost": {}, "size": (3, 3)},
-    "WALL": {"health": 50, "cost": {"wood": 10}, "size": (1, 1)},
-    "TOWER": {"health": 100, "cost": {"wood": 20, "stone": 15}, "size": (1, 1)},
-    "FARM": {"health": 75, "cost": {"wood": 15}, "size": (2, 2)},
-    "MINE": {"health": 100, "cost": {"wood": 25, "stone": 10}, "size": (2, 2)},
-    "WOOD_CUTTER": {"health": 80, "cost": {"wood": 20}, "size": (2, 2)},
-    "GOLD_MINE": {"health": 120, "cost": {"wood": 30, "stone": 20}, "size": (2, 2)},
-    "BARRACKS": {"health": 150, "cost": {"wood": 40, "stone": 30}, "size": (3, 2)},
-    "ARCHERY_RANGE": {"health": 120, "cost": {"wood": 35, "stone": 25}, "size": (3, 2)},
+    "TOWN_HALL": {
+        "health": 1000, 
+        "cost": {}, 
+        "size": (3, 3),
+        "category": "SPECIAL",
+        "construction_time": 0.0,
+    },
+    "WALL": {
+        "health": 50, 
+        "cost": {"wood": 10}, 
+        "size": (1, 1),
+        "category": "SPECIAL",
+        "construction_time": 5.0,
+    },
+    "TOWER": {
+        "health": 100, 
+        "cost": {"wood": 20, "stone": 15}, 
+        "size": (1, 1),
+        "category": "DEFENSIVE",
+        "construction_time": 15.0,
+        "attack_damage": 25.0,
+        "attack_range": 6.0,
+        "attack_speed": 1.5,  # Attacks per second
+    },
+    "FARM": {
+        "health": 75, 
+        "cost": {"wood": 15}, 
+        "size": (2, 2),
+        "category": "RESOURCE",
+        "construction_time": 10.0,
+        "resource_type": "wheat",
+        "resource_per_tick": 5,
+        "tick_interval": 30.0,
+    },
+    "MINE": {
+        "health": 100, 
+        "cost": {"wood": 25, "stone": 10}, 
+        "size": (2, 2),
+        "category": "RESOURCE",
+        "construction_time": 15.0,
+        "resource_type": "stone",
+        "resource_per_tick": 3,
+        "tick_interval": 30.0,
+    },
+    "WOOD_CUTTER": {
+        "health": 80, 
+        "cost": {"wood": 20}, 
+        "size": (2, 2),
+        "category": "RESOURCE",
+        "construction_time": 12.0,
+        "resource_type": "wood",
+        "resource_per_tick": 4,
+        "tick_interval": 30.0,
+    },
+    "GOLD_MINE": {
+        "health": 120, 
+        "cost": {"wood": 30, "stone": 20}, 
+        "size": (2, 2),
+        "category": "RESOURCE",
+        "construction_time": 20.0,
+        "resource_type": "gold",
+        "resource_per_tick": 2,
+        "tick_interval": 30.0,
+    },
+    "BARRACKS": {
+        "health": 150, 
+        "cost": {"wood": 40, "stone": 30}, 
+        "size": (3, 2),
+        "category": "UPGRADE",
+        "construction_time": 25.0,
+        "available_upgrades": ["melee_damage", "melee_armor", "unit_speed"],
+    },
+    "ARCHERY_RANGE": {
+        "health": 120, 
+        "cost": {"wood": 35, "stone": 25}, 
+        "size": (3, 2),
+        "category": "UPGRADE",
+        "construction_time": 20.0,
+        "available_upgrades": ["ranged_damage", "ranged_range", "attack_speed"],
+    },
     "CANNON_FOUNDRY": {
         "health": 200,
         "cost": {"wood": 50, "stone": 40, "metal": 20},
         "size": (3, 3),
+        "category": "DEFENSIVE",
+        "construction_time": 30.0,
+        "attack_damage": 60.0,
+        "attack_range": 8.0,
+        "attack_speed": 0.5,  # Slow but powerful
     },
 }
 
 RESOURCE_TYPES = ["wood", "stone", "wheat", "metal", "gold"]
+
+# Upgrade definitions
+UPGRADES = {
+    "melee_damage": {
+        "name": "Melee Damage",
+        "description": "Increases melee unit damage by 20%",
+        "cost": {"gold": 50, "metal": 25},
+        "effect": {"unit_damage_multiplier": 1.2},
+        "applies_to": ["SOLDIER"],
+    },
+    "melee_armor": {
+        "name": "Melee Armor", 
+        "description": "Increases melee unit health by 25%",
+        "cost": {"gold": 40, "stone": 30},
+        "effect": {"unit_health_multiplier": 1.25},
+        "applies_to": ["SOLDIER"],
+    },
+    "unit_speed": {
+        "name": "Unit Speed",
+        "description": "Increases unit movement speed by 15%", 
+        "cost": {"gold": 30, "wheat": 20},
+        "effect": {"unit_speed_multiplier": 1.15},
+        "applies_to": ["SOLDIER", "ARCHER", "CANNON"],
+    },
+    "ranged_damage": {
+        "name": "Ranged Damage",
+        "description": "Increases ranged unit damage by 25%",
+        "cost": {"gold": 60, "wood": 40},
+        "effect": {"unit_damage_multiplier": 1.25},
+        "applies_to": ["ARCHER"],
+    },
+    "ranged_range": {
+        "name": "Ranged Range",
+        "description": "Increases ranged unit attack range by 30%",
+        "cost": {"gold": 45, "metal": 20},
+        "effect": {"unit_range_multiplier": 1.3},
+        "applies_to": ["ARCHER"],
+    },
+    "attack_speed": {
+        "name": "Attack Speed",
+        "description": "Increases unit attack speed by 20%",
+        "cost": {"gold": 35, "wheat": 25},
+        "effect": {"unit_attack_speed_multiplier": 1.2},
+        "applies_to": ["ARCHER", "SOLDIER"],
+    },
+}
 
 UNIT_TYPES = {
     "SOLDIER": {"health": 60, "speed": 3, "cost": {"wheat": 2, "metal": 1}},

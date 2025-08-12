@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional
 import pygame
 
 from client.scenes.menu_scene import MenuScene
+from client.ui.building_menu import BuildingMenu
+from client.ui.building_placer import BuildingPlacer
 from client.ui.minimap import Minimap
 from client.ui.radial_ping_menu import RadialPingMenu
 from client.ui.resource_panel import ResourcePanel
@@ -17,7 +19,7 @@ from shared.constants.game_constants import (
     MAP_WIDTH,
     TILE_SIZE,
 )
-from shared.models.game_models import GameOverReason, GameState, TileType
+from shared.models.game_models import BuildingType, GameOverReason, GameState, Position, TileType
 
 
 class GameScene:
@@ -67,12 +69,16 @@ class GameScene:
 
         self.minimap = Minimap(20, screen.get_height() - 220, 200, 200)
         self.resource_panel = ResourcePanel(
-            screen.get_width() - 300, screen.get_height() - 100, 280, 80
+            screen.get_width() - 300, 20, 280, 80
         )
         self.selection_panel = SelectionPanel(
             screen.get_width() // 2 - 150, screen.get_height() - 120, 300, 100
         )
         self.radial_ping_menu = RadialPingMenu()
+
+        # Building UI components
+        self.building_menu = BuildingMenu(screen.get_width(), screen.get_height())
+        self.building_placer = BuildingPlacer()
 
         # Track CTRL key state for ping menu
         self.ctrl_pressed = False
@@ -175,6 +181,48 @@ class GameScene:
                     self._close_esc_menu()
                     return
 
+            # Handle building menu events
+            if self.building_menu.visible:
+                selected_building = self.building_menu.handle_event(event)
+                if selected_building:
+                    # Start building placement mode
+                    self.building_placer.start_placement(selected_building)
+                    # Keep building menu open during placement preview
+                    return
+                # Check if click was within the building menu area to prevent further processing
+                if event.button == 1:  # Only for left clicks
+                    mouse_pos = event.pos
+                    menu_rect = pygame.Rect(
+                        self.building_menu.menu_x, 
+                        self.building_menu.menu_y, 
+                        self.building_menu.menu_width, 
+                        self.building_menu.menu_height
+                    )
+                    if menu_rect.collidepoint(mouse_pos):
+                        return  # Click was on menu, don't process further
+
+            # Handle building placement
+            if self.building_placer.is_placing() and event.button == 1:
+                placement_info = self.building_placer.get_placement_info()
+                if placement_info and placement_info[2]:  # Valid placement
+                    # Send build command to server
+                    building_type, position, is_valid = placement_info
+                    # Convert pixel coordinates to tile coordinates for server
+                    from shared.constants.game_constants import TILE_SIZE
+                    tile_x = int(position.x // TILE_SIZE)
+                    tile_y = int(position.y // TILE_SIZE)
+                    asyncio.create_task(
+                        self.network_manager.send_game_action({
+                            "type": "build",
+                            "building_type": building_type.value,
+                            "position": {"x": tile_x, "y": tile_y}
+                        })
+                    )
+                    self.building_placer.stop_placement()
+                    # Clear building selection in menu so it returns to blue color
+                    self.building_menu.clear_selection()
+                    return
+
             # Check if ping menu is active and handle selection
             if self.radial_ping_menu.is_active and event.button == 1:
                 selected_ping = self.radial_ping_menu.get_selected_ping(event.pos)
@@ -201,7 +249,10 @@ class GameScene:
                     else:
                         self._handle_left_click(event.pos)
                 elif event.button == 3:
-                    if self.build_mode:
+                    if self.building_placer.is_placing():
+                        # Right-click during building placement: cancel placement
+                        self.building_placer.stop_placement()
+                    elif self.build_mode:
                         self.build_mode = None
                     else:
                         self._handle_right_click(event.pos)
@@ -236,6 +287,10 @@ class GameScene:
             ) ** 0.5
             if distance <= 2:
                 self.selected_entity = hero
+                # Open building menu when hero is selected
+                current_player = self.game_state.players.get(self.network_manager.player_id)
+                if current_player:
+                    self.building_menu.show(current_player.resources)
                 return
 
         # Check for enemy selection
@@ -246,6 +301,8 @@ class GameScene:
             ) ** 0.5
             if distance <= 2:
                 self.selected_entity = enemy
+                # Hide building menu when non-hero is selected
+                self.building_menu.hide()
                 return
 
         for building in self.game_state.buildings.values():
@@ -258,9 +315,13 @@ class GameScene:
                 < building.position.y + building.size[1]
             ):
                 self.selected_entity = building
+                # Hide building menu when non-hero is selected
+                self.building_menu.hide()
                 return
 
         self.selected_entity = None
+        # Hide building menu when nothing is selected
+        self.building_menu.hide()
 
     def _handle_right_click(self, pos: tuple):
         world_pos = self._screen_to_world(pos)
@@ -291,6 +352,10 @@ class GameScene:
                         }
                     )
                 )
+        else:
+            # No hero selected or right-clicked empty space - deselect
+            self.selected_entity = None
+            self.building_menu.hide()
 
     def _get_clicked_target(self, world_pos: tuple):
         """Determine what entity was clicked on"""
@@ -501,10 +566,10 @@ class GameScene:
         if 20 <= x <= 220 and screen_height - 220 <= y <= screen_height - 20:
             return False
 
-        # Check if mouse is over resource panel
+        # Check if mouse is over resource panel (now at top right)
         if (
             screen_width - 300 <= x <= screen_width
-            and screen_height - 100 <= y <= screen_height
+            and 20 <= y <= 100
         ):
             return False
 
@@ -628,6 +693,18 @@ class GameScene:
             # Handle mouse edge scrolling
             self._handle_mouse_edge_scrolling()
 
+        # Update building placer position if placing
+        if self.building_placer.is_placing():
+            mouse_pos = pygame.mouse.get_pos()
+            # Convert to world pixel coordinates (not tile coordinates)
+            world_pixel_x = mouse_pos[0] + self.camera_x
+            world_pixel_y = mouse_pos[1] + self.camera_y
+            self.building_placer.update_position(
+                Position(x=world_pixel_x, y=world_pixel_y),
+                self.game_state,
+                self.network_manager.player_id
+            )
+
     def render(self, screen: pygame.Surface):
         screen.fill(COLORS["BLACK"])
 
@@ -671,6 +748,13 @@ class GameScene:
         # Render pause indicator if game is paused
         if self.game_state.is_paused:
             self._render_pause_indicator(screen)
+
+        # Render building placement preview
+        if self.building_placer.is_placing():
+            self.building_placer.render_preview(screen, (self.camera_x, self.camera_y))
+
+        # Render building menu
+        self.building_menu.render(screen)
 
         # Render ESC menu on top of everything if open
         if self.esc_menu_open:

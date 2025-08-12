@@ -32,6 +32,13 @@ class BuildingType(str, Enum):
     CANNON_FOUNDRY = "CANNON_FOUNDRY"
 
 
+class BuildingCategory(str, Enum):
+    RESOURCE = "RESOURCE"
+    DEFENSIVE = "DEFENSIVE" 
+    UPGRADE = "UPGRADE"
+    SPECIAL = "SPECIAL"  # Town Hall, Walls
+
+
 class UnitType(str, Enum):
     SOLDIER = "SOLDIER"
     ARCHER = "ARCHER"
@@ -88,6 +95,26 @@ class Building(BaseModel):
     max_health: int
     player_id: str
     size: Tuple[int, int]
+    construction_time: float = 0.0  # Time to build
+    is_constructed: bool = False  # Building is under construction
+    last_tick_time: float = 0.0  # For resource buildings
+
+
+class ResourceBuilding(Building):
+    resource_type: ResourceType
+    resource_per_tick: int
+    tick_interval: float = 30.0  # Seconds between resource generation
+
+
+class DefensiveBuilding(Building):
+    attack_damage: float
+    attack_range: float
+    attack_speed: float  # Attacks per second
+    last_attack_time: float = 0.0
+
+
+class UpgradeBuilding(Building):
+    available_upgrades: List[str] = []  # List of upgrade IDs this building provides
 
 
 class Unit(BaseModel):
