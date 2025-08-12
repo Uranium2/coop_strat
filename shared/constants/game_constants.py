@@ -43,22 +43,22 @@ HERO_TYPES = {
 
 BUILDING_TYPES = {
     "TOWN_HALL": {
-        "health": 1000, 
-        "cost": {}, 
+        "health": 1000,
+        "cost": {},
         "size": (3, 3),
         "category": "SPECIAL",
         "construction_time": 0.0,
     },
     "WALL": {
-        "health": 50, 
-        "cost": {"wood": 10}, 
+        "health": 50,
+        "cost": {"wood": 10},
         "size": (1, 1),
         "category": "SPECIAL",
         "construction_time": 5.0,
     },
     "TOWER": {
-        "health": 100, 
-        "cost": {"wood": 20, "stone": 15}, 
+        "health": 100,
+        "cost": {"wood": 20, "stone": 15},
         "size": (1, 1),
         "category": "DEFENSIVE",
         "construction_time": 15.0,
@@ -67,8 +67,8 @@ BUILDING_TYPES = {
         "attack_speed": 1.5,  # Attacks per second
     },
     "FARM": {
-        "health": 75, 
-        "cost": {"wood": 15}, 
+        "health": 75,
+        "cost": {"wood": 15},
         "size": (2, 2),
         "category": "RESOURCE",
         "construction_time": 10.0,
@@ -77,8 +77,8 @@ BUILDING_TYPES = {
         "tick_interval": 30.0,
     },
     "MINE": {
-        "health": 100, 
-        "cost": {"wood": 25, "stone": 10}, 
+        "health": 100,
+        "cost": {"wood": 25, "stone": 10},
         "size": (2, 2),
         "category": "RESOURCE",
         "construction_time": 15.0,
@@ -87,8 +87,8 @@ BUILDING_TYPES = {
         "tick_interval": 30.0,
     },
     "WOOD_CUTTER": {
-        "health": 80, 
-        "cost": {"wood": 20}, 
+        "health": 80,
+        "cost": {"wood": 20},
         "size": (2, 2),
         "category": "RESOURCE",
         "construction_time": 12.0,
@@ -97,8 +97,8 @@ BUILDING_TYPES = {
         "tick_interval": 30.0,
     },
     "GOLD_MINE": {
-        "health": 120, 
-        "cost": {"wood": 30, "stone": 20}, 
+        "health": 120,
+        "cost": {"wood": 30, "stone": 20},
         "size": (2, 2),
         "category": "RESOURCE",
         "construction_time": 20.0,
@@ -107,16 +107,16 @@ BUILDING_TYPES = {
         "tick_interval": 30.0,
     },
     "BARRACKS": {
-        "health": 150, 
-        "cost": {"wood": 40, "stone": 30}, 
+        "health": 150,
+        "cost": {"wood": 40, "stone": 30},
         "size": (3, 2),
         "category": "UPGRADE",
         "construction_time": 25.0,
         "available_upgrades": ["melee_damage", "melee_armor", "unit_speed"],
     },
     "ARCHERY_RANGE": {
-        "health": 120, 
-        "cost": {"wood": 35, "stone": 25}, 
+        "health": 120,
+        "cost": {"wood": 35, "stone": 25},
         "size": (3, 2),
         "category": "UPGRADE",
         "construction_time": 20.0,
@@ -146,7 +146,7 @@ UPGRADES = {
         "applies_to": ["SOLDIER"],
     },
     "melee_armor": {
-        "name": "Melee Armor", 
+        "name": "Melee Armor",
         "description": "Increases melee unit health by 25%",
         "cost": {"gold": 40, "stone": 30},
         "effect": {"unit_health_multiplier": 1.25},
@@ -154,7 +154,7 @@ UPGRADES = {
     },
     "unit_speed": {
         "name": "Unit Speed",
-        "description": "Increases unit movement speed by 15%", 
+        "description": "Increases unit movement speed by 15%",
         "cost": {"gold": 30, "wheat": 20},
         "effect": {"unit_speed_multiplier": 1.15},
         "applies_to": ["SOLDIER", "ARCHER", "CANNON"],

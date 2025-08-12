@@ -21,10 +21,7 @@ from shared.constants.game_constants import (
 from shared.models.game_models import (
     Building,
     BuildingType,
-    BuildingCategory,
-    ResourceBuilding,
     DefensiveBuilding,
-    UpgradeBuilding,
     Enemy,
     GameOverReason,
     GameState,
@@ -32,10 +29,12 @@ from shared.models.game_models import (
     MovementTarget,
     Player,
     Position,
+    ResourceBuilding,
     Resources,
     ResourceType,
     TargetType,
     TileType,
+    UpgradeBuilding,
 )
 
 logger = logging.getLogger(__name__)
@@ -578,6 +577,54 @@ class GameManager:
                     return True
         return False
 
+    def _is_hero_adjacent_to_build_location(
+        self, player_id: str, position: Position, building_size: tuple
+    ) -> bool:
+        """Check if player's hero is adjacent to the building location"""
+        # Find player's hero
+        hero = None
+        for h in self.game_state.heroes.values():
+            if h.player_id == player_id:
+                hero = h
+                break
+
+        if not hero:
+            logger.warning(f"No hero found for player {player_id}")
+            return False
+
+        import math
+
+        # Check if hero is adjacent to any part of the building area
+        # Convert positions to tile coordinates for easier calculation
+        hero_tile_x = int(hero.position.x)
+        hero_tile_y = int(hero.position.y)
+        building_tile_x = int(position.x)
+        building_tile_y = int(position.y)
+
+        logger.info(
+            f"Building placement check: Hero at ({hero.position.x:.2f}, {hero.position.y:.2f}) -> tile ({hero_tile_x}, {hero_tile_y})"
+        )
+        logger.info(
+            f"Building placement check: Building at ({position.x}, {position.y}) -> tile ({building_tile_x}, {building_tile_y}), size {building_size}"
+        )
+
+        # Check all tiles of the building and see if hero is within 1.5 tiles (allows diagonal)
+        min_distance = float("inf")
+        for bx in range(building_tile_x, building_tile_x + building_size[0]):
+            for by in range(building_tile_y, building_tile_y + building_size[1]):
+                distance = math.sqrt((hero_tile_x - bx) ** 2 + (hero_tile_y - by) ** 2)
+                min_distance = min(min_distance, distance)
+                if distance <= 1.5:  # Allow diagonal adjacency
+                    logger.info(
+                        f"Hero is adjacent! Distance to building tile ({bx}, {by}): {distance:.2f}"
+                    )
+                    return True
+
+        logger.warning(
+            f"Hero is NOT adjacent! Minimum distance to building: {min_distance:.2f}"
+        )
+        return False
+
     def _update_buildings(self, current_time: float):
         """Update all buildings: construction, resource generation, defensive attacks"""
         for building in list(self.game_state.buildings.values()):
@@ -586,16 +633,18 @@ class GameManager:
                 if current_time >= building.last_tick_time + building.construction_time:
                     building.is_constructed = True
                     self.state_changed = True
-                    logger.info(f"Building {building.building_type} construction completed")
+                    logger.info(
+                        f"Building {building.building_type} construction completed"
+                    )
                 continue
-            
+
             # Handle resource buildings
             if isinstance(building, ResourceBuilding):
                 if current_time - building.last_tick_time >= building.tick_interval:
                     self._generate_resources(building, current_time)
                     building.last_tick_time = current_time
                     self.state_changed = True
-            
+
             # Handle defensive buildings
             elif isinstance(building, DefensiveBuilding):
                 self._update_defensive_building(building, current_time)
@@ -605,48 +654,58 @@ class GameManager:
         player = self.game_state.players.get(building.player_id)
         if not player:
             return
-            
+
         resource_type = building.resource_type.value
         current_amount = getattr(player.resources, resource_type, 0)
-        setattr(player.resources, resource_type, current_amount + building.resource_per_tick)
-        
-        logger.debug(f"Generated {building.resource_per_tick} {resource_type} for player {building.player_id}")
+        setattr(
+            player.resources, resource_type, current_amount + building.resource_per_tick
+        )
 
-    def _update_defensive_building(self, building: DefensiveBuilding, current_time: float):
+        logger.debug(
+            f"Generated {building.resource_per_tick} {resource_type} for player {building.player_id}"
+        )
+
+    def _update_defensive_building(
+        self, building: DefensiveBuilding, current_time: float
+    ):
         """Update defensive building attacks"""
         if current_time - building.last_attack_time < (1.0 / building.attack_speed):
             return
-            
+
         # Find enemies in range
         target_enemy = None
-        closest_distance = float('inf')
-        
+        closest_distance = float("inf")
+
         for enemy in self.game_state.enemies.values():
             if enemy.is_dead:
                 continue
-                
+
             distance = self._distance(
-                building.position.x, building.position.y,
-                enemy.position.x, enemy.position.y
+                building.position.x,
+                building.position.y,
+                enemy.position.x,
+                enemy.position.y,
             )
-            
+
             if distance <= building.attack_range and distance < closest_distance:
                 target_enemy = enemy
                 closest_distance = distance
-        
+
         # Attack the closest enemy
         if target_enemy:
             damage = building.attack_damage
             target_enemy.health = max(0, target_enemy.health - int(damage))
             building.last_attack_time = current_time
-            
-            logger.debug(f"Defensive building {building.building_type} attacked enemy {target_enemy.id} for {damage} damage")
-            
+
+            logger.debug(
+                f"Defensive building {building.building_type} attacked enemy {target_enemy.id} for {damage} damage"
+            )
+
             if target_enemy.health <= 0:
                 target_enemy.is_dead = True
                 target_enemy.death_time = current_time
                 logger.info(f"Enemy {target_enemy.id} killed by defensive building")
-            
+
             self.state_changed = True
         return False
 
@@ -1232,29 +1291,51 @@ class GameManager:
     def build_structure(
         self, player_id: str, building_type: BuildingType, position: Position
     ) -> bool:
+        logger.info(
+            f"BUILD REQUEST: Player {player_id} wants to build {building_type.value} at ({position.x}, {position.y})"
+        )
+
         player = self.game_state.players.get(player_id)
         if not player:
+            logger.warning(f"Player {player_id} not found")
             return False
 
         building_info = BUILDING_TYPES.get(building_type)
         if not building_info:
+            logger.warning(f"Building type {building_type} not found in BUILDING_TYPES")
             return False
 
         cost = building_info["cost"]
         if not self._can_afford(player, cost):
+            logger.warning(
+                f"Player {player_id} cannot afford {building_type.value}: needs {cost}, has {player.resources}"
+            )
             return False
 
         if not self._is_valid_build_position(position, building_info["size"]):
+            logger.warning(
+                f"Invalid build position ({position.x}, {position.y}) for {building_type.value}"
+            )
             return False
 
+        # Check if player's hero is adjacent to build location
+        if not self._is_hero_adjacent_to_build_location(
+            player_id, position, building_info["size"]
+        ):
+            logger.warning(
+                f"Hero not adjacent to build location for {building_type.value}"
+            )
+            return False
+
+        logger.info(f"BUILD SUCCESS: All checks passed for {building_type.value}")
         self._deduct_resources(player, cost)
 
         building_id = str(uuid.uuid4())
-        
+
         # Create the appropriate building type based on category
         category = building_info.get("category", "SPECIAL")
         current_time = time.time()
-        
+
         if category == "RESOURCE":
             building = ResourceBuilding(
                 id=building_id,
@@ -1315,8 +1396,12 @@ class GameManager:
                 is_constructed=building_info.get("construction_time", 0.0) == 0.0,
                 last_tick_time=current_time,
             )
-        
+
         self.game_state.buildings[building_id] = building
+        self.state_changed = True  # Make sure state change is flagged
+        logger.info(
+            f"BUILDING CREATED: {building_type.value} with ID {building_id} added to game state"
+        )
         return True
 
     def _can_afford(self, player: Player, cost: Dict[str, int]) -> bool:

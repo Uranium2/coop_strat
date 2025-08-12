@@ -34,9 +34,15 @@ class BuildingType(str, Enum):
 
 class BuildingCategory(str, Enum):
     RESOURCE = "RESOURCE"
-    DEFENSIVE = "DEFENSIVE" 
+    DEFENSIVE = "DEFENSIVE"
     UPGRADE = "UPGRADE"
     SPECIAL = "SPECIAL"  # Town Hall, Walls
+
+
+class BuildingPreviewState(str, Enum):
+    VALID = "VALID"  # Green - Hero is adjacent, can build immediately
+    TRAVELING = "TRAVELING"  # Orange - Hero is moving to build location
+    INVALID = "INVALID"  # Red - Cannot build here
 
 
 class UnitType(str, Enum):

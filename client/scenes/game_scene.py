@@ -1,6 +1,6 @@
 import asyncio
 import math
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import pygame
 
@@ -19,7 +19,12 @@ from shared.constants.game_constants import (
     MAP_WIDTH,
     TILE_SIZE,
 )
-from shared.models.game_models import BuildingType, GameOverReason, GameState, Position, TileType
+from shared.models.game_models import (
+    GameOverReason,
+    GameState,
+    Position,
+    TileType,
+)
 
 
 class GameScene:
@@ -68,9 +73,7 @@ class GameScene:
         }
 
         self.minimap = Minimap(20, screen.get_height() - 220, 200, 200)
-        self.resource_panel = ResourcePanel(
-            screen.get_width() - 300, 20, 280, 80
-        )
+        self.resource_panel = ResourcePanel(screen.get_width() - 300, 20, 280, 80)
         self.selection_panel = SelectionPanel(
             screen.get_width() // 2 - 150, screen.get_height() - 120, 300, 100
         )
@@ -91,6 +94,9 @@ class GameScene:
         }
         self.font = pygame.font.Font(None, 36)
         self.small_font = pygame.font.Font(None, 24)
+
+        # Pending build state for automatic construction when hero arrives
+        self.pending_build = None
 
         self.fog_surface = pygame.Surface(
             (MAP_WIDTH * TILE_SIZE, MAP_HEIGHT * TILE_SIZE), pygame.SRCALPHA
@@ -193,10 +199,10 @@ class GameScene:
                 if event.button == 1:  # Only for left clicks
                     mouse_pos = event.pos
                     menu_rect = pygame.Rect(
-                        self.building_menu.menu_x, 
-                        self.building_menu.menu_y, 
-                        self.building_menu.menu_width, 
-                        self.building_menu.menu_height
+                        self.building_menu.menu_x,
+                        self.building_menu.menu_y,
+                        self.building_menu.menu_width,
+                        self.building_menu.menu_height,
                     )
                     if menu_rect.collidepoint(mouse_pos):
                         return  # Click was on menu, don't process further
@@ -204,23 +210,57 @@ class GameScene:
             # Handle building placement
             if self.building_placer.is_placing() and event.button == 1:
                 placement_info = self.building_placer.get_placement_info()
-                if placement_info and placement_info[2]:  # Valid placement
-                    # Send build command to server
+                if (
+                    placement_info
+                ):  # Valid placement position (regardless of hero proximity)
                     building_type, position, is_valid = placement_info
                     # Convert pixel coordinates to tile coordinates for server
                     from shared.constants.game_constants import TILE_SIZE
+
                     tile_x = int(position.x // TILE_SIZE)
                     tile_y = int(position.y // TILE_SIZE)
-                    asyncio.create_task(
-                        self.network_manager.send_game_action({
+
+                    if is_valid:  # Hero is adjacent - instant build
+                        asyncio.create_task(
+                            self.network_manager.send_game_action(
+                                {
+                                    "type": "build",
+                                    "building_type": building_type.value,
+                                    "position": {"x": tile_x, "y": tile_y},
+                                }
+                            )
+                        )
+                        self.building_placer.stop_placement()
+                        # Clear building selection in menu so it returns to blue color
+                        self.building_menu.clear_selection()
+                    else:  # Hero is not adjacent - set up travel-to-build
+                        self.pending_build = {
                             "type": "build",
                             "building_type": building_type.value,
-                            "position": {"x": tile_x, "y": tile_y}
-                        })
-                    )
-                    self.building_placer.stop_placement()
-                    # Clear building selection in menu so it returns to blue color
-                    self.building_menu.clear_selection()
+                            "position": {"x": tile_x, "y": tile_y},
+                        }
+                        # Place fixed preview on map at click position
+                        self.building_placer.place_preview_on_map(
+                            position, self.game_state, self.network_manager.player_id
+                        )
+                        # Disable cursor preview so it doesn't follow mouse
+                        self.building_placer.is_cursor_preview = False
+                        # Send hero to building location
+                        asyncio.create_task(
+                            self.network_manager.send_game_action(
+                                {
+                                    "type": "move_hero",
+                                    "target_position": {"x": tile_x, "y": tile_y},
+                                }
+                            )
+                        )
+                        self.building_placer.set_hero_traveling(True)
+                        print(
+                            f"🚶 Hero traveling to build {building_type.value} at ({tile_x}, {tile_y})"
+                        )
+                        print(
+                            f"📍 Fixed preview placed on map at ({position.x}, {position.y})"
+                        )
                     return
 
             # Check if ping menu is active and handle selection
@@ -288,7 +328,9 @@ class GameScene:
             if distance <= 2:
                 self.selected_entity = hero
                 # Open building menu when hero is selected
-                current_player = self.game_state.players.get(self.network_manager.player_id)
+                current_player = self.game_state.players.get(
+                    self.network_manager.player_id
+                )
                 if current_player:
                     self.building_menu.show(current_player.resources)
                 return
@@ -567,10 +609,7 @@ class GameScene:
             return False
 
         # Check if mouse is over resource panel (now at top right)
-        if (
-            screen_width - 300 <= x <= screen_width
-            and 20 <= y <= 100
-        ):
+        if screen_width - 300 <= x <= screen_width and 20 <= y <= 100:
             return False
 
         # Check if mouse is over selection panel
@@ -619,6 +658,10 @@ class GameScene:
 
         self.game_state = GameState(**data["game_state"])
         self._update_fog_of_war()
+
+        # Check if hero reached pending build location
+        if self.pending_build:
+            self._check_hero_arrival_for_pending_build()
 
         # Check for game over conditions
         print(
@@ -702,7 +745,7 @@ class GameScene:
             self.building_placer.update_position(
                 Position(x=world_pixel_x, y=world_pixel_y),
                 self.game_state,
-                self.network_manager.player_id
+                self.network_manager.player_id,
             )
 
     def render(self, screen: pygame.Surface):
@@ -1147,7 +1190,6 @@ class GameScene:
 
     def _quit_to_menu(self):
         """Quit to main menu"""
-        from client.scenes.menu_scene import MenuScene
 
         self.next_scene = MenuScene(self.screen, self.network_manager)
 
@@ -1196,7 +1238,68 @@ class GameScene:
         )
         screen.blit(quit_text, quit_rect)
 
-    def get_next_scene(self) -> Optional["MenuScene"]:
+    def _check_hero_arrival_for_pending_build(self):
+        """Check if hero has arrived at pending build location and auto-build"""
+        if not self.pending_build:
+            return
+
+        # Get the current player's hero
+        player_id = self.network_manager.player_id
+        hero = None
+        for h in self.game_state.heroes.values():
+            if h.player_id == player_id:
+                hero = h
+                break
+
+        if not hero:
+            return
+
+        # Check if hero is adjacent to pending build position
+        pending_pos = self.pending_build["position"]
+        building_type = self.pending_build["building_type"]
+        from shared.constants.game_constants import BUILDING_TYPES
+
+        # Get building size
+        building_info = BUILDING_TYPES.get(building_type)
+        if not building_info:
+            return
+        size = building_info["size"]
+
+        # Convert coordinates to tiles
+        hero_tile_x = int(hero.position.x)  # Hero position is in tile coordinates
+        hero_tile_y = int(hero.position.y)
+        building_tile_x = pending_pos["x"]  # Position is already in tile coordinates
+        building_tile_y = pending_pos["y"]
+
+        # Check if hero touches any border of the building area
+        # Hero needs to be within 1 tile of the building's edge
+        is_adjacent = False
+        for bx in range(building_tile_x, building_tile_x + size[0]):
+            for by in range(building_tile_y, building_tile_y + size[1]):
+                distance = math.sqrt((hero_tile_x - bx) ** 2 + (hero_tile_y - by) ** 2)
+                if distance <= 1.5:  # Hero touches building border
+                    is_adjacent = True
+                    break
+            if is_adjacent:
+                break
+
+        if is_adjacent:
+            print(f"🏗️ Hero reached building border! Auto-constructing {building_type}")
+            print(
+                f"📍 Hero at ({hero_tile_x}, {hero_tile_y}), Building at ({building_tile_x}, {building_tile_y}) size {size}"
+            )
+            # Send the build command
+            asyncio.create_task(
+                self.network_manager.send_game_action(self.pending_build)
+            )
+            # Clear the pending build and stop travel state
+            self.pending_build = None
+            self.building_placer.set_hero_traveling(False)
+            self.building_placer.stop_placement()
+            self.building_menu.clear_selection()
+            print("✅ Auto-build command sent and states cleared")
+
+    def get_next_scene(self):
         if self.next_scene:
             print(
                 f"[DEBUG] get_next_scene called - returning: {type(self.next_scene).__name__}"
