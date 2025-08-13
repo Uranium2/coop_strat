@@ -97,6 +97,9 @@ class GameScene:
 
         # Pending build state for automatic construction when hero arrives
         self.pending_build = None
+        
+        # Gathering range visualization toggle - now controls hiding all ranges
+        self.hide_all_gathering_ranges = False
 
         self.fog_surface = pygame.Surface(
             (MAP_WIDTH * TILE_SIZE, MAP_HEIGHT * TILE_SIZE), pygame.SRCALPHA
@@ -147,6 +150,8 @@ class GameScene:
                 asyncio.create_task(
                     self.network_manager.send_game_action({"type": "toggle_pause"})
                 )
+            elif event.key == pygame.K_r:  # R to hide all gathering ranges
+                self.hide_all_gathering_ranges = not self.hide_all_gathering_ranges
             elif event.key in self.keys_pressed:
                 self.keys_pressed[event.key] = True
 
@@ -753,6 +758,9 @@ class GameScene:
 
         self._render_map(screen)
         self._render_buildings(screen)
+        # Render gathering ranges after buildings but before other entities
+        if not self.hide_all_gathering_ranges:
+            self._render_gathering_ranges(screen)
         self._render_enemies(screen)
         self._render_fog_of_war(screen)
         # Render heroes AFTER fog of war so they're always visible
@@ -947,6 +955,119 @@ class GameScene:
                 rect = pygame.Rect(screen_pos[0], screen_pos[1], width, height)
                 pygame.draw.rect(screen, color, rect)
                 pygame.draw.rect(screen, COLORS["WHITE"], rect, 2)
+
+    def _render_gathering_ranges(self, screen: pygame.Surface):
+        """Render gathering ranges for resource buildings"""
+        from shared.models.game_models import BuildingType
+        
+        # Define which building types are resource buildings
+        resource_building_types = {
+            BuildingType.FARM,
+            BuildingType.WOOD_CUTTER, 
+            BuildingType.MINE,
+            BuildingType.GOLD_MINE
+        }
+        
+        # Check if any resource building is selected (this will show ranges for all resource buildings)
+        has_selected_resource_building = False
+        if self.selected_entity:
+            building_type = getattr(self.selected_entity, 'building_type', None)
+            has_selected_resource_building = building_type in resource_building_types
+        
+        if has_selected_resource_building:
+            for building in self.game_state.buildings.values():
+                if building.building_type not in resource_building_types:
+                    continue
+                    
+                if building.health <= 0:  # Skip destroyed buildings
+                    continue
+                
+                is_selected = (self.selected_entity and 
+                             hasattr(self.selected_entity, 'id') and 
+                             self.selected_entity.id == building.id)
+                
+                self._render_single_gathering_range(screen, building, bool(is_selected))
+
+    def _render_single_gathering_range(self, screen: pygame.Surface, building, is_selected: bool = False):
+        """Render gathering range for a single building"""
+        # Calculate the gathering range area (5x5 tiles around building)
+        range_size = 2  # 2 tiles in each direction (5x5 total)
+        
+        # Calculate the range boundaries in world coordinates
+        range_left = building.position.x - range_size
+        range_top = building.position.y - range_size
+        range_right = building.position.x + building.size[0] + range_size
+        range_bottom = building.position.y + building.size[1] + range_size
+        
+        # Convert to screen coordinates
+        screen_left = int(range_left * TILE_SIZE - self.camera_x)
+        screen_top = int(range_top * TILE_SIZE - self.camera_y)
+        screen_right = int(range_right * TILE_SIZE - self.camera_x)
+        screen_bottom = int(range_bottom * TILE_SIZE - self.camera_y)
+        
+        # Only render if visible on screen
+        if (screen_right > 0 and screen_left < screen.get_width() and 
+            screen_bottom > 0 and screen_top < screen.get_height()):
+            
+            # Create a transparent white surface for the range area
+            range_width = screen_right - screen_left
+            range_height = screen_bottom - screen_top
+            
+            if range_width > 0 and range_height > 0:
+                # Use different opacity and color for selected vs all buildings
+                if is_selected:
+                    # Brighter and more visible for selected building
+                    fill_color = (255, 255, 0, 80)  # Yellow with higher alpha
+                    border_color = (255, 255, 0, 200)  # Bright yellow border
+                    border_width = 3
+                else:
+                    # Subtle for non-selected buildings
+                    fill_color = (255, 255, 255, 30)  # White with very low alpha
+                    border_color = (255, 255, 255, 100)  # White border
+                    border_width = 2
+                
+                # Create surface with transparent fill
+                range_surface = pygame.Surface((range_width, range_height), pygame.SRCALPHA)
+                range_surface.fill(fill_color)
+                
+                # Draw the filled area
+                screen.blit(range_surface, (screen_left, screen_top))
+                
+                # Draw dotted border around the range
+                self._draw_dotted_rect(screen, (screen_left, screen_top, range_width, range_height), 
+                                     border_color, border_width, 8)
+
+    def _draw_dotted_rect(self, surface: pygame.Surface, rect: tuple, color: tuple, width: int, dot_length: int):
+        """Draw a dotted rectangle border"""
+        x, y, w, h = rect
+        
+        # Draw dotted top edge
+        for i in range(0, w, dot_length * 2):
+            start_x = x + i
+            end_x = min(x + i + dot_length, x + w)
+            if start_x < end_x:
+                pygame.draw.line(surface, color[:3], (start_x, y), (end_x, y), width)
+        
+        # Draw dotted bottom edge  
+        for i in range(0, w, dot_length * 2):
+            start_x = x + i
+            end_x = min(x + i + dot_length, x + w)
+            if start_x < end_x:
+                pygame.draw.line(surface, color[:3], (start_x, y + h), (end_x, y + h), width)
+        
+        # Draw dotted left edge
+        for i in range(0, h, dot_length * 2):
+            start_y = y + i
+            end_y = min(y + i + dot_length, y + h)
+            if start_y < end_y:
+                pygame.draw.line(surface, color[:3], (x, start_y), (x, end_y), width)
+        
+        # Draw dotted right edge
+        for i in range(0, h, dot_length * 2):
+            start_y = y + i
+            end_y = min(y + i + dot_length, y + h)
+            if start_y < end_y:
+                pygame.draw.line(surface, color[:3], (x + w, start_y), (x + w, end_y), width)
 
     def _render_heroes(self, screen: pygame.Surface):
         font = pygame.font.Font(None, 20)

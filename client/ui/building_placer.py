@@ -158,29 +158,29 @@ class BuildingPlacer:
 
         # Convert to tile coordinates
         # Hero position is already in tile coordinates
-        hero_tile_x = int(hero.position.x)
-        hero_tile_y = int(hero.position.y)
+        hero_tile_x = hero.position.x
+        hero_tile_y = hero.position.y
         # Building position is in pixel coordinates, convert to tiles
-        building_tile_x = int(building_position.x // TILE_SIZE)
-        building_tile_y = int(building_position.y // TILE_SIZE)
+        building_tile_x = building_position.x // TILE_SIZE
+        building_tile_y = building_position.y // TILE_SIZE
 
         # Check if hero is adjacent to any part of the building
-        # Hero needs to be within 1 tile of the building's edge
-        for bx in range(building_tile_x, building_tile_x + size[0]):
-            for by in range(building_tile_y, building_tile_y + size[1]):
+        # Hero needs to be within 1.5 tiles of the building's edge (allows diagonal adjacency)
+        for bx in range(int(building_tile_x), int(building_tile_x) + size[0]):
+            for by in range(int(building_tile_y), int(building_tile_y) + size[1]):
                 distance = math.sqrt((hero_tile_x - bx) ** 2 + (hero_tile_y - by) ** 2)
-                if distance <= 2.5:  # Allow diagonal adjacency with larger radius
+                if distance <= 1.5:  # Allow diagonal adjacency
                     return True
 
         # Debug info
         min_distance = float("inf")
-        for bx in range(building_tile_x, building_tile_x + size[0]):
-            for by in range(building_tile_y, building_tile_y + size[1]):
+        for bx in range(int(building_tile_x), int(building_tile_x) + size[0]):
+            for by in range(int(building_tile_y), int(building_tile_y) + size[1]):
                 distance = math.sqrt((hero_tile_x - bx) ** 2 + (hero_tile_y - by) ** 2)
                 min_distance = min(min_distance, distance)
 
         # Uncomment for debugging
-        # print(f"🔍 Hero at tile ({hero_tile_x}, {hero_tile_y}), building at ({building_tile_x}, {building_tile_y}), min distance: {min_distance:.2f}")
+        # print(f"🔍 Hero at tile ({hero_tile_x:.2f}, {hero_tile_y:.2f}), building at ({building_tile_x:.2f}, {building_tile_y:.2f}), min distance: {min_distance:.2f}")
 
         return False
 
