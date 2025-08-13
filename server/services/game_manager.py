@@ -87,6 +87,7 @@ class GameManager:
         self.hero_paths: Dict[
             str, List[Position]
         ] = {}  # Store current paths for heroes
+        self.hero_stuck_detection: Dict[str, Dict] = {}  # Track stuck heroes
         self.last_update = time.time()
         self.tick_rate = 60  # 60 FPS server tick rate
         self.network_update_rate = 20  # Send updates to clients 20 times per second
@@ -375,6 +376,9 @@ class GameManager:
             self.state_changed = True
             # Update vision when hero moves
             self._update_vision(hero.player_id)
+            
+            # Check for stuck heroes and apply recovery
+            self._check_hero_stuck(hero_id, hero, dt)
 
     def _get_target_position(self, target: MovementTarget) -> Optional[Position]:
         """Get current position of a dynamic target"""
@@ -1493,7 +1497,96 @@ class GameManager:
                         <= y
                         < building.position.y + building.size[1]
                     ):
-                        return False
+                        return True
+        return False
+
+    def _check_hero_stuck(self, hero_id: str, hero: Hero, dt: float):
+        """Check if hero is stuck and apply recovery mechanism"""
+        current_time = time.time()
+        current_pos = hero.position
+        
+        # Initialize stuck detection for new heroes
+        if hero_id not in self.hero_stuck_detection:
+            self.hero_stuck_detection[hero_id] = {
+                "last_position": Position(x=current_pos.x, y=current_pos.y),
+                "stuck_time": 0.0,
+                "last_check_time": current_time
+            }
+            return
+        
+        stuck_data = self.hero_stuck_detection[hero_id]
+        time_since_check = current_time - stuck_data["last_check_time"]
+        
+        # Only check every 0.5 seconds to avoid false positives
+        if time_since_check < 0.5:
+            return
+            
+        # Calculate distance moved since last check
+        last_pos = stuck_data["last_position"]
+        distance_moved = ((current_pos.x - last_pos.x) ** 2 + (current_pos.y - last_pos.y) ** 2) ** 0.5
+        
+        # Hero is considered stuck if they haven't moved much and have a target
+        min_movement = 0.1  # Minimum expected movement in 0.5 seconds
+        is_stuck = (distance_moved < min_movement and 
+                   hero_id in self.hero_targets and 
+                   len(self.hero_paths.get(hero_id, [])) > 0)
+        
+        if is_stuck:
+            stuck_data["stuck_time"] += time_since_check
+            logger.debug(f"Hero {hero_id} stuck for {stuck_data['stuck_time']:.1f}s at ({current_pos.x:.2f}, {current_pos.y:.2f})")
+            
+            # Apply recovery after 2 seconds of being stuck
+            if stuck_data["stuck_time"] >= 2.0:
+                self._apply_stuck_recovery(hero_id, hero)
+                stuck_data["stuck_time"] = 0.0  # Reset stuck timer after recovery
+        else:
+            stuck_data["stuck_time"] = 0.0  # Reset stuck timer if hero moved
+        
+        # Update tracking data
+        stuck_data["last_position"] = Position(x=current_pos.x, y=current_pos.y)
+        stuck_data["last_check_time"] = current_time
+    
+    def _apply_stuck_recovery(self, hero_id: str, hero: Hero):
+        """Apply recovery mechanism for stuck hero"""
+        logger.info(f"Applying stuck recovery for hero {hero_id}")
+        
+        # Try to find a safe position nearby
+        safe_positions = []
+        current_x, current_y = hero.position.x, hero.position.y
+        
+        # Check positions in expanding circles around hero
+        for radius in [1, 2, 3]:
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                        
+                    new_x = current_x + dx * 0.5  # Check half-tile increments
+                    new_y = current_y + dy * 0.5
+                    
+                    # Check if this position is safe
+                    if not self._is_position_blocked(new_x, new_y, hero_id):
+                        safe_positions.append((new_x, new_y))
+        
+        if safe_positions:
+            # Move to closest safe position
+            closest_pos = min(safe_positions, 
+                            key=lambda pos: (pos[0] - current_x) ** 2 + (pos[1] - current_y) ** 2)
+            
+            hero.position.x, hero.position.y = closest_pos
+            logger.info(f"Moved stuck hero {hero_id} to safe position ({closest_pos[0]:.2f}, {closest_pos[1]:.2f})")
+            
+            # Recalculate path from new position
+            if hero_id in self.hero_targets:
+                target = self.hero_targets[hero_id]
+                self._calculate_path_to_target(hero_id, hero, target)
+        else:
+            # Last resort: clear target to stop movement
+            logger.warning(f"No safe position found for stuck hero {hero_id}, clearing target")
+            if hero_id in self.hero_targets:
+                del self.hero_targets[hero_id]
+            if hero_id in self.hero_paths:
+                del self.hero_paths[hero_id]
 
         return True
 

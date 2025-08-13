@@ -58,29 +58,66 @@ class Pathfinder:
     def is_walkable(
         self, x: int, y: int, game_state, excluding_hero_id: str = None
     ) -> bool:
-        """Check if a tile is walkable (no static obstacles)"""
+        """Check if a tile is walkable (no static obstacles, accounting for collision radius)"""
         # Check map bounds
         if x < 0 or x >= self.map_width or y < 0 or y >= self.map_height:
             return False
 
-        # Check tile type
-        tile_type = game_state.map_data[y][x]
-        if tile_type in [TileType.WOOD, TileType.WALL]:
-            return False
+        # Hero collision radius - same as used in game_manager.py
+        collision_radius = 0.4
+        
+        # Check if the hero (with collision radius) would fit at this tile center
+        hero_center_x = x + 0.5  # Tile center
+        hero_center_y = y + 0.5
+        
+        # Check all tiles that the hero's collision box would overlap
+        min_check_x = int(hero_center_x - collision_radius)
+        max_check_x = int(hero_center_x + collision_radius) + 1
+        min_check_y = int(hero_center_y - collision_radius)
+        max_check_y = int(hero_center_y + collision_radius) + 1
+        
+        for check_y in range(min_check_y, max_check_y):
+            for check_x in range(min_check_x, max_check_x):
+                # Check if this tile is within collision radius
+                tile_center_x = check_x + 0.5
+                tile_center_y = check_y + 0.5
+                
+                # Calculate overlap between hero's collision box and this tile
+                hero_left = hero_center_x - collision_radius
+                hero_right = hero_center_x + collision_radius
+                hero_top = hero_center_y - collision_radius
+                hero_bottom = hero_center_y + collision_radius
+                
+                tile_left = check_x
+                tile_right = check_x + 1
+                tile_top = check_y  
+                tile_bottom = check_y + 1
+                
+                # Check if hero's collision box overlaps this tile
+                if (hero_right > tile_left and hero_left < tile_right and 
+                    hero_bottom > tile_top and hero_top < tile_bottom):
+                    
+                    # Check if this overlapping tile is blocked
+                    if (check_x < 0 or check_x >= self.map_width or 
+                        check_y < 0 or check_y >= self.map_height):
+                        return False
+                        
+                    tile_type = game_state.map_data[check_y][check_x]
+                    if tile_type in [TileType.WOOD, TileType.WALL]:
+                        return False
 
-        # Check buildings (static obstacles)
+        # Check buildings (static obstacles) with collision radius
         for building in game_state.buildings.values():
             if building.health <= 0:
                 continue
 
-            building_x = int(building.position.x)
-            building_y = int(building.position.y)
+            building_x = building.position.x
+            building_y = building.position.y
             width, height = building.size
 
-            if (
-                building_x <= x < building_x + width
-                and building_y <= y < building_y + height
-            ):
+            # Expand building bounds by collision radius
+            if (building_x - collision_radius <= hero_center_x <= building_x + width + collision_radius and
+                building_y - collision_radius <= hero_center_y <= building_y + height + collision_radius):
                 return False
 
         return True
@@ -102,11 +139,12 @@ class Pathfinder:
         if not self.is_walkable(
             goal_tile_x, goal_tile_y, game_state, excluding_hero_id
         ):
-            goal_tile_x, goal_tile_y = self.find_nearest_walkable(
+            nearest_result = self.find_nearest_walkable(
                 goal_tile_x, goal_tile_y, game_state, excluding_hero_id
             )
-            if goal_tile_x is None:
+            if nearest_result[0] is None or nearest_result[1] is None:
                 return []  # No path possible
+            goal_tile_x, goal_tile_y = nearest_result
 
         open_set = []
         closed_set: Set[Tuple[int, int]] = set()
