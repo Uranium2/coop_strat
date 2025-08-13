@@ -224,7 +224,8 @@ async def handle_message(player_id: str, message: dict):
 
     elif message_type == "start_game":
         lobby_id = manager.player_lobbies.get(player_id)
-        logger.info(f"Player {player_id} requesting to start game in lobby {lobby_id}")
+        map_file = message.get("map_file", None)  # Optional map file
+        logger.info(f"Player {player_id} requesting to start game in lobby {lobby_id} with map: {map_file or 'generated'}")
 
         if lobby_id:
             lobby = lobby_manager.get_lobby(lobby_id)
@@ -232,7 +233,7 @@ async def handle_message(player_id: str, message: dict):
                 logger.info(f"Starting game for lobby {lobby_id}")
                 try:
                     lobby.start_game()  # Mark lobby as active
-                    game_manager = GameManager(lobby_id, lobby.players)
+                    game_manager = GameManager(lobby_id, lobby.players, custom_map=map_file)
                     game_managers[lobby_id] = game_manager
                     initial_state = game_manager.get_game_state()
 

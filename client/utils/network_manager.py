@@ -91,9 +91,12 @@ class NetworkManager:
         logger.info(f"Selecting hero type: {hero_type}")
         await self.send_message({"type": "select_hero", "hero_type": hero_type})
 
-    async def start_game(self):
-        logger.info("Requesting to start game")
-        await self.send_message({"type": "start_game"})
+    async def start_game(self, map_file: Optional[str] = None):
+        logger.info(f"Requesting to start game with map: {map_file or 'generated'}")
+        message = {"type": "start_game"}
+        if map_file:
+            message["map_file"] = map_file
+        await self.send_message(message)
 
     async def send_game_action(self, action: Dict[str, Any]):
         logger.debug(f"Sending game action: {action.get('type', 'unknown')}")

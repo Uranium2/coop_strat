@@ -1,11 +1,27 @@
 import logging
-import random
 import time
 import uuid
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Any
 
+from shared.constants.game_constants import BUILDING_TYPES, ENEMY_TYPES, MAP_HEIGHT, MAP_WIDTH
+from shared.models.game_models import (
+    AttackEffect,
+    Building,
+    BuildingType,
+    Enemy,
+    GameOverReason,
+    GameState,
+    Hero,
+    Ping,
+    Player,
+    Position,
+    Resources,
+    TileType,
+    Unit,
+)
 from server.services.combat_service import CombatService
 from server.services.map_generator import MapGenerator
+from server.services.map_loader import MapLoader
 from server.services.pathfinding import Pathfinder
 from shared.constants.game_constants import (
     BUILDING_TYPES,
@@ -41,8 +57,9 @@ logger = logging.getLogger(__name__)
 
 
 class GameManager:
-    def __init__(self, lobby_id: str, players: Dict[str, Player]):
+    def __init__(self, lobby_id: str, players: Dict[str, Player], custom_map: Optional[str] = None):
         self.lobby_id = lobby_id
+        self.custom_map = custom_map  # Custom map filename
         self.game_state = GameState(
             lobby_id=lobby_id,
             players=players,
@@ -79,10 +96,49 @@ class GameManager:
         self._initialize_game()
 
     def _initialize_game(self):
+        if self.custom_map:
+            # Try to load custom map first
+            logger.info(f"Attempting to load custom map: {self.custom_map}")
+            map_loader = MapLoader()
+            loaded_map = map_loader.load_map(self.custom_map)
+            
+            if loaded_map:
+                logger.info(f"Successfully loaded custom map: {self.custom_map}")
+                self.game_state.map_data = loaded_map["map_data"]
+                
+                # For custom maps, place town hall at center (200x200 maps)
+                center_x = MAP_WIDTH // 2
+                center_y = MAP_HEIGHT // 2
+                
+                town_hall_id = str(uuid.uuid4())
+                self.game_state.buildings[town_hall_id] = Building(
+                    id=town_hall_id,
+                    building_type=BuildingType.TOWN_HALL,
+                    position=Position(x=center_x, y=center_y),
+                    health=1000,
+                    max_health=1000,
+                    player_id="shared",
+                    size=(3, 3),
+                )
+                
+                hero_positions = [
+                    (center_x - 2, center_y - 2),
+                    (center_x + 2, center_y - 2),
+                    (center_x - 2, center_y + 2),
+                    (center_x + 2, center_y + 2),
+                ]
+                
+                self._spawn_heroes(hero_positions)
+                logger.info(f"Game initialized with custom map: {self.custom_map}")
+                return
+            else:
+                logger.warning(f"Failed to load custom map {self.custom_map}, falling back to generated map")
+        
+        # Fallback to generated map or if no custom map specified
         # Use lobby_id hash as seed to ensure all players get the same map
         seed = hash(self.lobby_id) % (2**32)
         logger.info(
-            f"Initializing game for lobby {self.lobby_id} with map seed: {seed}"
+            f"Initializing game for lobby {self.lobby_id} with generated map (seed: {seed})"
         )
 
         map_generator = MapGenerator(seed=seed)
@@ -110,6 +166,11 @@ class GameManager:
             (center_x + 2, center_y + 2),
         ]
 
+        self._spawn_heroes(hero_positions)
+        logger.info(f"Game initialized with generated map")
+        
+    def _spawn_heroes(self, hero_positions: List[Tuple[int, int]]):
+        """Spawn heroes at given positions and complete game initialization"""
         for i, (player_id, player) in enumerate(self.game_state.players.items()):
             if i < len(hero_positions):
                 hero_id = str(uuid.uuid4())

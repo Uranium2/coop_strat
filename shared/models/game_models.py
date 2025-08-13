@@ -59,6 +59,7 @@ class TileType(str, Enum):
     METAL = "METAL"
     GOLD = "GOLD"
     WALL = "WALL"
+    TOWN_HALL = "TOWN_HALL"
 
 
 class GameOverReason(str, Enum):

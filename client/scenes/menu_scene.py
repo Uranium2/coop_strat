@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+import glob
 
 import pygame
 
@@ -21,6 +23,8 @@ class MenuScene:
         self.lobby_id = ""
         self.player_name = "Player"
         self.selected_hero = "TANK"
+        self.selected_map = None  # None means auto-generated map
+        self.available_maps = self._discover_maps()
         self.next_scene = None
 
         logger.info("MenuScene initialized")
@@ -39,6 +43,9 @@ class MenuScene:
             "ARCHER": pygame.Rect(540, 200, 100, 50),
             "MAGE": pygame.Rect(660, 200, 100, 50),
         }
+        
+        # Map selection buttons (will be positioned dynamically based on available maps)
+        self.map_buttons = {}
 
         self.network_manager.register_handler("lobby_created", self._on_lobby_created)
         self.network_manager.register_handler("player_joined", self._on_player_joined)
@@ -52,6 +59,22 @@ class MenuScene:
         self.lobby_list_refresh_interval = 3.0  # Refresh every 3 seconds
 
         logger.info("All message handlers registered")
+
+    def _discover_maps(self):
+        """Discover available map files in the maps directory"""
+        try:
+            maps_dir = os.path.join(os.getcwd(), "maps")
+            if not os.path.exists(maps_dir):
+                logger.warning(f"Maps directory not found: {maps_dir}")
+                return []
+            
+            map_files = glob.glob(os.path.join(maps_dir, "*.json"))
+            map_names = [os.path.basename(f) for f in map_files]
+            logger.info(f"Discovered maps: {map_names}")
+            return map_names
+        except Exception as e:
+            logger.error(f"Error discovering maps: {e}")
+            return []
 
     def handle_event(self, event: pygame.event.Event):
         if event.type == pygame.KEYDOWN:
@@ -163,10 +186,16 @@ class MenuScene:
                     self.selected_hero = hero_type
                     asyncio.create_task(self.network_manager.select_hero(hero_type))
 
-            start_button = pygame.Rect(400, 350, 200, 50)
+            # Handle map selection clicks
+            for map_name, rect in self.map_buttons.items():
+                if rect.collidepoint(pos):
+                    logger.info(f"Map {map_name} selected")
+                    self.selected_map = map_name
+
+            start_button = pygame.Rect(400, 450, 200, 50)  # Moved down to make room for map selection
             if start_button.collidepoint(pos):
-                logger.info("Start game button clicked")
-                asyncio.create_task(self.network_manager.start_game())
+                logger.info(f"Start game button clicked with map: {self.selected_map or 'auto-generated'}")
+                asyncio.create_task(self.network_manager.start_game(self.selected_map))
 
     async def _connect_to_server(self):
         logger.info("Attempting to connect to server")
@@ -386,7 +415,44 @@ class MenuScene:
             text_rect = text_surf.get_rect(center=rect.center)
             screen.blit(text_surf, text_rect)
 
-        start_button = pygame.Rect(400, 350, 200, 50)
+        # Map selection section
+        map_text = self.small_font.render("Select Map:", True, COLORS["WHITE"])
+        screen.blit(map_text, (300, 270))
+        
+        # Update map buttons dynamically
+        self.map_buttons.clear()
+        
+        # Auto-generated map option (always first)
+        auto_rect = pygame.Rect(300, 300, 180, 40)
+        self.map_buttons[None] = auto_rect  # None key for auto-generated
+        color = COLORS["GREEN"] if self.selected_map is None else COLORS["GRAY"]
+        pygame.draw.rect(screen, color, auto_rect)
+        pygame.draw.rect(screen, COLORS["WHITE"], auto_rect, 2)
+        auto_text = self.small_font.render("Auto-Generated", True, COLORS["WHITE"])
+        auto_text_rect = auto_text.get_rect(center=auto_rect.center)
+        screen.blit(auto_text, auto_text_rect)
+        
+        # Custom map options
+        for i, map_name in enumerate(self.available_maps):
+            x_offset = (i + 1) % 3 * 200  # 3 maps per row
+            y_offset = (i + 1) // 3 * 50  # New row every 3 maps
+            map_rect = pygame.Rect(300 + x_offset, 350 + y_offset, 180, 40)
+            self.map_buttons[map_name] = map_rect
+            
+            color = COLORS["GREEN"] if self.selected_map == map_name else COLORS["GRAY"]
+            pygame.draw.rect(screen, color, map_rect)
+            pygame.draw.rect(screen, COLORS["WHITE"], map_rect, 2)
+            
+            # Display shortened name if too long
+            display_name = map_name.replace('.json', '')
+            if len(display_name) > 15:
+                display_name = display_name[:12] + "..."
+            
+            map_text_surf = self.small_font.render(display_name, True, COLORS["WHITE"])
+            map_text_rect = map_text_surf.get_rect(center=map_rect.center)
+            screen.blit(map_text_surf, map_text_rect)
+
+        start_button = pygame.Rect(400, 450, 200, 50)  # Moved down to make room
         pygame.draw.rect(screen, COLORS["GREEN"], start_button)
         pygame.draw.rect(screen, COLORS["WHITE"], start_button, 2)
 
