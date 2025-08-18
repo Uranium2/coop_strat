@@ -29,6 +29,9 @@ class Pathfinder:
     def __init__(self, map_width: int, map_height: int):
         self.map_width = map_width
         self.map_height = map_height
+        # NavMesh will be added later
+        self.navmesh_pathfinder = None
+        self.navmesh_initialized = False
 
     def heuristic(self, x1: int, y1: int, x2: int, y2: int) -> float:
         """Manhattan distance heuristic"""
@@ -56,7 +59,7 @@ class Pathfinder:
         return neighbors
 
     def is_walkable(
-        self, x: int, y: int, game_state, excluding_hero_id: str = None
+        self, x: int, y: int, game_state, excluding_hero_id: Optional[str] = None
     ) -> bool:
         """Check if a tile is walkable (no static obstacles, accounting for collision radius)"""
         # Check map bounds
@@ -129,7 +132,7 @@ class Pathfinder:
         goal_x: float,
         goal_y: float,
         game_state,
-        excluding_hero_id: str = None,
+        excluding_hero_id: Optional[str] = None,
     ) -> List[Position]:
         """Find path using A* algorithm"""
         start_tile_x, start_tile_y = int(start_x), int(start_y)
@@ -206,7 +209,7 @@ class Pathfinder:
         return []  # No path found
 
     def find_nearest_walkable(
-        self, x: int, y: int, game_state, excluding_hero_id: str = None
+        self, x: int, y: int, game_state, excluding_hero_id: Optional[str] = None
     ) -> Tuple[Optional[int], Optional[int]]:
         """Find the nearest walkable tile to the given position"""
         if self.is_walkable(x, y, game_state, excluding_hero_id):
@@ -235,25 +238,96 @@ class Pathfinder:
         goal_x: float,
         goal_y: float,
     ) -> List[Position]:
-        """Reconstruct path from goal to start"""
-        path = []
+        """Reconstruct path from goal to start with smoothing"""
+        # First, build the raw tile-based path with slight randomization for more natural movement
+        raw_path = []
         current = goal_node
 
         while current:
-            path.append(Position(x=float(current.x + 0.5), y=float(current.y + 0.5)))
+            # Add slight offset from tile center for more natural paths
+            offset_x = 0.0
+            offset_y = 0.0
+            
+            # Only offset intermediate waypoints, not start/end
+            if current.parent and current != goal_node:
+                # Small random offset (±0.2 from center) to avoid perfectly grid-aligned movement
+                offset_x = ((current.x * 17 + current.y * 23) % 41 - 20) * 0.01  # Deterministic "random"
+                offset_y = ((current.x * 31 + current.y * 13) % 37 - 18) * 0.01
+                
+            x = float(current.x + 0.5 + offset_x)
+            y = float(current.y + 0.5 + offset_y)
+            raw_path.append(Position(x=x, y=y))
             current = current.parent
 
-        path.reverse()
+        raw_path.reverse()
 
         # Replace first position with exact start
-        if path:
-            path[0] = Position(x=start_x, y=start_y)
+        if raw_path:
+            raw_path[0] = Position(x=start_x, y=start_y)
 
-        # Replace last position with exact goal (if it's walkable)
-        if path and len(path) > 1:
-            path[-1] = Position(x=goal_x, y=goal_y)
+        # Replace last position with exact goal
+        if raw_path and len(raw_path) > 1:
+            raw_path[-1] = Position(x=goal_x, y=goal_y)
 
-        return path
+        # Apply simple path smoothing by removing redundant waypoints
+        if len(raw_path) <= 2:
+            return raw_path
+            
+        return self._smooth_path_simple(raw_path)
+
+    def _smooth_path_simple(self, path: List[Position]) -> List[Position]:
+        """Simple path smoothing by removing waypoints that are nearly collinear"""
+        if len(path) <= 2:
+            return path
+            
+        smoothed = [path[0]]  # Always keep start point
+        
+        i = 0
+        while i < len(path) - 1:
+            # Look ahead to see if we can skip intermediate waypoints
+            j = i + 1
+            
+            # Try to extend the line as far as possible
+            while j < len(path) - 1:
+                # Check if the three points are roughly collinear
+                if self._are_points_roughly_collinear(path[i], path[j], path[j + 1]):
+                    j += 1
+                else:
+                    break
+                    
+            # Add the furthest point we can reach in a straight line
+            smoothed.append(path[j])
+            i = j
+            
+        return smoothed
+        
+    def _are_points_roughly_collinear(self, p1: Position, p2: Position, p3: Position) -> bool:
+        """Check if three points are roughly in a straight line"""
+        # Calculate vectors
+        v1_x = p2.x - p1.x
+        v1_y = p2.y - p1.y
+        v2_x = p3.x - p2.x
+        v2_y = p3.y - p2.y
+        
+        # If either vector is very short, consider them collinear
+        if (abs(v1_x) < 0.1 and abs(v1_y) < 0.1) or (abs(v2_x) < 0.1 and abs(v2_y) < 0.1):
+            return True
+            
+        # Calculate cross product (measures how "perpendicular" the vectors are)
+        cross_product = abs(v1_x * v2_y - v1_y * v2_x)
+        
+        # Calculate the magnitudes
+        mag1 = (v1_x * v1_x + v1_y * v1_y) ** 0.5
+        mag2 = (v2_x * v2_x + v2_y * v2_y) ** 0.5
+        
+        if mag1 < 0.01 or mag2 < 0.01:
+            return True
+            
+        # Normalize the cross product by the magnitudes
+        normalized_cross = cross_product / (mag1 * mag2)
+        
+        # If the normalized cross product is small, the vectors are nearly parallel
+        return normalized_cross < 0.3  # Adjust this threshold for more/less smoothing
 
 
 # Legacy compatibility class

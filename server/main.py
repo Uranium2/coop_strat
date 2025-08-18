@@ -378,19 +378,18 @@ async def handle_game_action(lobby_id: str, player_id: str, action: dict):
         from shared.models.game_models import BuildingType, Position
 
         position = Position(x=position_data["x"], y=position_data["y"])
+        logger.info(f"[BUILD DEBUG] Received build request: {building_type} at ({position.x}, {position.y})")
 
         if game_manager.build_structure(
             player_id, BuildingType(building_type), position
         ):
-            logger.debug(
-                f"Building {building_type} placed successfully for {player_id}"
-            )
+            logger.info(f"[BUILD DEBUG] ✅ Building {building_type} placed successfully for {player_id}")
             updated_state = game_manager.get_game_state()
             await manager.send_to_lobby(
                 lobby_id, {"type": "game_update", "game_state": updated_state.dict()}
             )
         else:
-            logger.warning(f"Failed to build {building_type} for {player_id}")
+            logger.warning(f"[BUILD DEBUG] ❌ Failed to build {building_type} for {player_id}")
 
     elif action_type == "toggle_pause":
         if game_manager.toggle_pause():

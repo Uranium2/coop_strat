@@ -92,6 +92,7 @@ class Hero(BaseModel):
     attack_range: float = 1.0
     speed: float = 2.0
     attack_speed: float = 1.0
+    path_waypoints: List[Position] = []  # Current pathfinding waypoints
 
 
 class Building(BaseModel):

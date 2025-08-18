@@ -3,7 +3,13 @@ import time
 import uuid
 from typing import Dict, List, Optional, Tuple, Any
 
-from shared.constants.game_constants import BUILDING_TYPES, ENEMY_TYPES, MAP_HEIGHT, MAP_WIDTH
+from shared.constants.game_constants import (
+    BUILDING_TYPES,
+    ENEMY_TYPES,
+    MAP_HEIGHT,
+    MAP_WIDTH,
+    TILE_SIZE,
+)
 from shared.models.game_models import (
     AttackEffect,
     Building,
@@ -57,7 +63,12 @@ logger = logging.getLogger(__name__)
 
 
 class GameManager:
-    def __init__(self, lobby_id: str, players: Dict[str, Player], custom_map: Optional[str] = None):
+    def __init__(
+        self,
+        lobby_id: str,
+        players: Dict[str, Player],
+        custom_map: Optional[str] = None,
+    ):
         self.lobby_id = lobby_id
         self.custom_map = custom_map  # Custom map filename
         self.game_state = GameState(
@@ -81,12 +92,12 @@ class GameManager:
         self.combat_service = CombatService()
 
         # Movement and tick system
-        self.hero_targets: Dict[
-            str, MovementTarget
-        ] = {}  # Store movement targets for heroes
-        self.hero_paths: Dict[
-            str, List[Position]
-        ] = {}  # Store current paths for heroes
+        self.hero_targets: Dict[str, MovementTarget] = (
+            {}
+        )  # Store movement targets for heroes
+        self.hero_paths: Dict[str, List[Position]] = (
+            {}
+        )  # Store current paths for heroes
         self.hero_stuck_detection: Dict[str, Dict] = {}  # Track stuck heroes
         self.last_update = time.time()
         self.tick_rate = 60  # 60 FPS server tick rate
@@ -102,39 +113,41 @@ class GameManager:
             logger.info(f"Attempting to load custom map: {self.custom_map}")
             map_loader = MapLoader()
             loaded_map = map_loader.load_map(self.custom_map)
-            
+
             if loaded_map:
                 logger.info(f"Successfully loaded custom map: {self.custom_map}")
                 self.game_state.map_data = loaded_map["map_data"]
-                
+
                 # For custom maps, place town hall at center (200x200 maps)
                 center_x = MAP_WIDTH // 2
                 center_y = MAP_HEIGHT // 2
-                
+
                 town_hall_id = str(uuid.uuid4())
                 self.game_state.buildings[town_hall_id] = Building(
                     id=town_hall_id,
                     building_type=BuildingType.TOWN_HALL,
-                    position=Position(x=center_x, y=center_y),
+                    position=Position(x=center_x * TILE_SIZE, y=center_y * TILE_SIZE),  # Convert to pixel coordinates
                     health=1000,
                     max_health=1000,
                     player_id="shared",
                     size=(3, 3),
                 )
-                
+
                 hero_positions = [
                     (center_x - 2, center_y - 2),
                     (center_x + 2, center_y - 2),
                     (center_x - 2, center_y + 2),
                     (center_x + 2, center_y + 2),
                 ]
-                
+
                 self._spawn_heroes(hero_positions)
                 logger.info(f"Game initialized with custom map: {self.custom_map}")
                 return
             else:
-                logger.warning(f"Failed to load custom map {self.custom_map}, falling back to generated map")
-        
+                logger.warning(
+                    f"Failed to load custom map {self.custom_map}, falling back to generated map"
+                )
+
         # Fallback to generated map or if no custom map specified
         # Use lobby_id hash as seed to ensure all players get the same map
         seed = hash(self.lobby_id) % (2**32)
@@ -153,7 +166,7 @@ class GameManager:
         self.game_state.buildings[town_hall_id] = Building(
             id=town_hall_id,
             building_type=BuildingType.TOWN_HALL,
-            position=Position(x=center_x, y=center_y),
+            position=Position(x=center_x * TILE_SIZE, y=center_y * TILE_SIZE),  # Convert to pixel coordinates
             health=1000,
             max_health=1000,
             player_id="shared",
@@ -169,7 +182,7 @@ class GameManager:
 
         self._spawn_heroes(hero_positions)
         logger.info(f"Game initialized with generated map")
-        
+
     def _spawn_heroes(self, hero_positions: List[Tuple[int, int]]):
         """Spawn heroes at given positions and complete game initialization"""
         for i, (player_id, player) in enumerate(self.game_state.players.items()):
@@ -342,8 +355,9 @@ class GameManager:
                     new_x = hero.position.x + move_x
                     new_y = hero.position.y + move_y
 
-                    if self._is_dynamic_obstacle_at(new_x, new_y, hero_id):
-                        # Recalculate path to avoid dynamic obstacle
+                    # Check for any collision (static and dynamic obstacles)
+                    if self._is_position_blocked(new_x, new_y, hero_id):
+                        # Recalculate path to avoid obstacle
                         self._calculate_path_to_target(hero_id, hero, target)
                         break
 
@@ -368,6 +382,8 @@ class GameManager:
                     del self.hero_targets[hero_id]
                     if hero_id in self.hero_paths:
                         del self.hero_paths[hero_id]
+                    # Clear hero waypoints
+                    hero.path_waypoints = []
                     logger.debug(f"Hero {hero_id} reached target")
                 else:
                     # Recalculate path if not reached target but no path
@@ -376,7 +392,7 @@ class GameManager:
             self.state_changed = True
             # Update vision when hero moves
             self._update_vision(hero.player_id)
-            
+
             # Check for stuck heroes and apply recovery
             self._check_hero_stuck(hero_id, hero, dt)
 
@@ -452,6 +468,12 @@ class GameManager:
 
         if path:
             self.hero_paths[hero_id] = path
+            # Store path waypoints in hero for client visualization
+            hero = self.game_state.heroes.get(hero_id)
+            if hero:
+                hero.path_waypoints = [
+                    Position(x=float(pos.x), y=float(pos.y)) for pos in path
+                ]
             logger.debug(
                 f"Calculated path for hero {hero_id} with {len(path)} waypoints"
             )
@@ -460,6 +482,10 @@ class GameManager:
             # Remove target if no path possible
             if hero_id in self.hero_paths:
                 del self.hero_paths[hero_id]
+            # Clear waypoints from hero
+            hero = self.game_state.heroes.get(hero_id)
+            if hero:
+                hero.path_waypoints = []
 
     def _is_dynamic_obstacle_at(
         self, x: float, y: float, excluding_hero_id: str = None
@@ -491,17 +517,36 @@ class GameManager:
         self, x: float, y: float, excluding_hero_id: str = None
     ) -> bool:
         """Check if a position is blocked by any collision"""
-        # Convert to integer tile coordinates
-        tile_x = int(x)
-        tile_y = int(y)
+        hero_radius = 0.4  # Heroes have a collision radius
 
-        # Check map bounds
-        if tile_x < 0 or tile_x >= MAP_WIDTH or tile_y < 0 or tile_y >= MAP_HEIGHT:
+        # Check map bounds - include collision radius
+        if (
+            x - hero_radius < 0
+            or x + hero_radius >= MAP_WIDTH
+            or y - hero_radius < 0
+            or y + hero_radius >= MAP_HEIGHT
+        ):
             return True
 
-        # Check tile collision (trees and walls)
-        if self._is_tile_collidable(tile_x, tile_y):
-            return True
+        # Check tile collision with hero radius - need to check all tiles that hero's collision area overlaps
+        for check_y in range(int(y - hero_radius), int(y + hero_radius) + 1):
+            for check_x in range(int(x - hero_radius), int(x + hero_radius) + 1):
+                if self._is_tile_collidable(check_x, check_y):
+                    # Check if hero's collision circle actually overlaps this tile
+                    tile_center_x = check_x + 0.5
+                    tile_center_y = check_y + 0.5
+
+                    # Find closest point on tile to hero center
+                    closest_x = max(check_x, min(x, check_x + 1))
+                    closest_y = max(check_y, min(y, check_y + 1))
+
+                    # Check distance from hero center to closest point on tile
+                    dx = x - closest_x
+                    dy = y - closest_y
+                    distance = (dx * dx + dy * dy) ** 0.5
+
+                    if distance < hero_radius:
+                        return True
 
         # Check building collision
         if self._is_building_at_position(x, y):
@@ -546,11 +591,17 @@ class GameManager:
             building_y = building.position.y
             width, height = building.size
 
-            # Expand building bounds by hero radius for proper collision
-            if (
-                building_x - hero_radius <= x <= building_x + width + hero_radius
-                and building_y - hero_radius <= y <= building_y + height + hero_radius
-            ):
+            # Calculate the closest point on the building to the hero center
+            closest_x = max(building_x, min(x, building_x + width))
+            closest_y = max(building_y, min(y, building_y + height))
+
+            # Calculate distance from hero center to closest point on building
+            dx = x - closest_x
+            dy = y - closest_y
+            distance = (dx * dx + dy * dy) ** 0.5
+
+            # Check if hero's collision radius overlaps with building
+            if distance < hero_radius:
                 return True
 
         return False
@@ -661,27 +712,48 @@ class GameManager:
 
         # Check if hero is adjacent to any part of the building area
         # Convert positions to tile coordinates for easier calculation
-        hero_tile_x = int(hero.position.x)
+        hero_tile_x = int(
+            hero.position.x
+        )  # Hero position is already in tile coordinates
         hero_tile_y = int(hero.position.y)
-        building_tile_x = int(position.x)
-        building_tile_y = int(position.y)
+
+        # Convert building pixel coordinates to tile coordinates
+        from shared.constants.game_constants import TILE_SIZE
+
+        building_tile_x = int(position.x // TILE_SIZE)
+        building_tile_y = int(position.y // TILE_SIZE)
 
         logger.info(
             f"Building placement check: Hero at ({hero.position.x:.2f}, {hero.position.y:.2f}) -> tile ({hero_tile_x}, {hero_tile_y})"
         )
         logger.info(
-            f"Building placement check: Building at ({position.x}, {position.y}) -> tile ({building_tile_x}, {building_tile_y}), size {building_size}"
+            f"Building placement check: Building at pixels ({position.x}, {position.y}) -> tile ({building_tile_x}, {building_tile_y}), size {building_size}"
         )
 
-        # Check all tiles of the building and see if hero is within 1.5 tiles (allows diagonal)
+        # Extra debug for coordinate conversion
+        logger.info(f"🔍 DEBUG ADJACENCY: Hero at tile ({hero_tile_x}, {hero_tile_y})")
+        logger.info(
+            f"🔍 DEBUG ADJACENCY: Building at pixels ({position.x}, {position.y}) -> tiles ({building_tile_x}, {building_tile_y})"
+        )
+        logger.info(f"🔍 DEBUG ADJACENCY: Building size: {building_size}")
+
+        # Check all tiles of the building and see if hero is within 1.8 tiles (slightly more lenient)
         min_distance = float("inf")
         for bx in range(building_tile_x, building_tile_x + building_size[0]):
             for by in range(building_tile_y, building_tile_y + building_size[1]):
                 distance = math.sqrt((hero_tile_x - bx) ** 2 + (hero_tile_y - by) ** 2)
                 min_distance = min(min_distance, distance)
-                if distance <= 1.5:  # Allow diagonal adjacency
+                logger.info(
+                    f"🔍 DEBUG ADJACENCY: Distance from hero ({hero_tile_x}, {hero_tile_y}) to building tile ({bx}, {by}): {distance:.2f}"
+                )
+                if (
+                    distance <= 1.8
+                ):  # Slightly more lenient than 1.5 to account for pathfinding precision
                     logger.info(
                         f"Hero is adjacent! Distance to building tile ({bx}, {by}): {distance:.2f}"
+                    )
+                    logger.info(
+                        f"✅ DEBUG ADJACENCY: Hero is adjacent at distance {distance:.2f}"
                     )
                     return True
 
@@ -1272,7 +1344,7 @@ class GameManager:
             target = MovementTarget(
                 target_type=TargetType.POSITION,
                 position=target_position,
-                follow_distance=0.5,
+                follow_distance=0.2,  # Reduced from 0.5 for more precise building placement
             )
 
             # Set movement target and calculate initial path
@@ -1481,108 +1553,144 @@ class GameManager:
             setattr(player.resources, resource, max(0, current - amount))
 
     def _is_valid_build_position(self, position: Position, size: tuple) -> bool:
+        """Check if building position is valid (within bounds and not overlapping)"""
+        # Convert pixel coordinates to tile coordinates
+        from shared.constants.game_constants import TILE_SIZE
+
+        start_tile_x = int(position.x // TILE_SIZE)
+        start_tile_y = int(position.y // TILE_SIZE)
+
         width, height = size
         for dx in range(width):
             for dy in range(height):
-                x, y = position.x + dx, position.y + dy
-                if not (0 <= x < MAP_WIDTH and 0 <= y < MAP_HEIGHT):
+                tile_x = start_tile_x + dx
+                tile_y = start_tile_y + dy
+
+                # Check bounds in tile coordinates
+                if not (0 <= tile_x < MAP_WIDTH and 0 <= tile_y < MAP_HEIGHT):
+                    logger.warning(
+                        f"Building extends outside map bounds: tile ({tile_x}, {tile_y})"
+                    )
                     return False
 
+                # Check for overlapping with existing buildings
                 for building in self.game_state.buildings.values():
+                    building_tile_x = int(building.position.x // TILE_SIZE)
+                    building_tile_y = int(building.position.y // TILE_SIZE)
+                    building_width, building_height = building.size
+
+                    # Check if this tile overlaps with the existing building
                     if (
-                        building.position.x
-                        <= x
-                        < building.position.x + building.size[0]
-                        and building.position.y
-                        <= y
-                        < building.position.y + building.size[1]
+                        building_tile_x <= tile_x < building_tile_x + building_width
+                        and building_tile_y
+                        <= tile_y
+                        < building_tile_y + building_height
                     ):
-                        return True
-        return False
+                        logger.warning(
+                            f"Building overlaps with existing building at tile ({tile_x}, {tile_y})"
+                        )
+                        return False
+
+        logger.info(
+            f"Build position validation passed for tiles ({start_tile_x}, {start_tile_y}) to ({start_tile_x + width - 1}, {start_tile_y + height - 1})"
+        )
+        return True
 
     def _check_hero_stuck(self, hero_id: str, hero: Hero, dt: float):
         """Check if hero is stuck and apply recovery mechanism"""
         current_time = time.time()
         current_pos = hero.position
-        
+
         # Initialize stuck detection for new heroes
         if hero_id not in self.hero_stuck_detection:
             self.hero_stuck_detection[hero_id] = {
                 "last_position": Position(x=current_pos.x, y=current_pos.y),
                 "stuck_time": 0.0,
-                "last_check_time": current_time
+                "last_check_time": current_time,
             }
             return
-        
+
         stuck_data = self.hero_stuck_detection[hero_id]
         time_since_check = current_time - stuck_data["last_check_time"]
-        
+
         # Only check every 0.5 seconds to avoid false positives
         if time_since_check < 0.5:
             return
-            
+
         # Calculate distance moved since last check
         last_pos = stuck_data["last_position"]
-        distance_moved = ((current_pos.x - last_pos.x) ** 2 + (current_pos.y - last_pos.y) ** 2) ** 0.5
-        
+        distance_moved = (
+            (current_pos.x - last_pos.x) ** 2 + (current_pos.y - last_pos.y) ** 2
+        ) ** 0.5
+
         # Hero is considered stuck if they haven't moved much and have a target
         min_movement = 0.1  # Minimum expected movement in 0.5 seconds
-        is_stuck = (distance_moved < min_movement and 
-                   hero_id in self.hero_targets and 
-                   len(self.hero_paths.get(hero_id, [])) > 0)
-        
+        is_stuck = (
+            distance_moved < min_movement
+            and hero_id in self.hero_targets
+            and len(self.hero_paths.get(hero_id, [])) > 0
+        )
+
         if is_stuck:
             stuck_data["stuck_time"] += time_since_check
-            logger.debug(f"Hero {hero_id} stuck for {stuck_data['stuck_time']:.1f}s at ({current_pos.x:.2f}, {current_pos.y:.2f})")
-            
+            logger.debug(
+                f"Hero {hero_id} stuck for {stuck_data['stuck_time']:.1f}s at ({current_pos.x:.2f}, {current_pos.y:.2f})"
+            )
+
             # Apply recovery after 2 seconds of being stuck
             if stuck_data["stuck_time"] >= 2.0:
                 self._apply_stuck_recovery(hero_id, hero)
                 stuck_data["stuck_time"] = 0.0  # Reset stuck timer after recovery
         else:
             stuck_data["stuck_time"] = 0.0  # Reset stuck timer if hero moved
-        
+
         # Update tracking data
         stuck_data["last_position"] = Position(x=current_pos.x, y=current_pos.y)
         stuck_data["last_check_time"] = current_time
-    
+
     def _apply_stuck_recovery(self, hero_id: str, hero: Hero):
         """Apply recovery mechanism for stuck hero"""
         logger.info(f"Applying stuck recovery for hero {hero_id}")
-        
+
         # Try to find a safe position nearby
         safe_positions = []
         current_x, current_y = hero.position.x, hero.position.y
-        
+
         # Check positions in expanding circles around hero
         for radius in [1, 2, 3]:
             for dx in range(-radius, radius + 1):
                 for dy in range(-radius, radius + 1):
                     if dx == 0 and dy == 0:
                         continue
-                        
+
                     new_x = current_x + dx * 0.5  # Check half-tile increments
                     new_y = current_y + dy * 0.5
-                    
+
                     # Check if this position is safe
                     if not self._is_position_blocked(new_x, new_y, hero_id):
                         safe_positions.append((new_x, new_y))
-        
+
         if safe_positions:
             # Move to closest safe position
-            closest_pos = min(safe_positions, 
-                            key=lambda pos: (pos[0] - current_x) ** 2 + (pos[1] - current_y) ** 2)
-            
+            closest_pos = min(
+                safe_positions,
+                key=lambda pos: (pos[0] - current_x) ** 2 + (pos[1] - current_y) ** 2,
+            )
+
             hero.position.x, hero.position.y = closest_pos
-            logger.info(f"Moved stuck hero {hero_id} to safe position ({closest_pos[0]:.2f}, {closest_pos[1]:.2f})")
-            
+            logger.info(
+                f"Moved stuck hero {hero_id} to safe position ({closest_pos[0]:.2f}, {closest_pos[1]:.2f})"
+            )
+
             # Recalculate path from new position
             if hero_id in self.hero_targets:
                 target = self.hero_targets[hero_id]
                 self._calculate_path_to_target(hero_id, hero, target)
         else:
             # Last resort: clear target to stop movement
-            logger.warning(f"No safe position found for stuck hero {hero_id}, clearing target")
+            logger.warning(
+                f"No safe position found for stuck hero {hero_id}, clearing target"
+            )
             if hero_id in self.hero_targets:
                 del self.hero_targets[hero_id]
             if hero_id in self.hero_paths:

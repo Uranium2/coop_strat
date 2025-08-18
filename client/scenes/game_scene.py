@@ -1,5 +1,6 @@
 import asyncio
 import math
+import os
 from typing import Any, Dict
 
 import pygame
@@ -97,9 +98,13 @@ class GameScene:
 
         # Pending build state for automatic construction when hero arrives
         self.pending_build = None
-        
+
         # Gathering range visualization toggle - now controls hiding all ranges
         self.hide_all_gathering_ranges = False
+
+        # Debug visualization toggles
+        self.show_grid = False
+        self.show_waypoints = False
 
         self.fog_surface = pygame.Surface(
             (MAP_WIDTH * TILE_SIZE, MAP_HEIGHT * TILE_SIZE), pygame.SRCALPHA
@@ -113,6 +118,11 @@ class GameScene:
             TileType.GOLD: COLORS["YELLOW"],
         }
 
+        # Load tile images
+        self.tree_images, self.wheat_images, self.metal_images, self.gold_images = (
+            self._load_tile_images()
+        )
+
         self.network_manager.register_handler("game_update", self._on_game_update)
         self.network_manager.register_handler("hero_moved", self._on_hero_moved)
         self.network_manager.register_handler(
@@ -120,6 +130,113 @@ class GameScene:
         )
 
         self._update_fog_of_war()
+
+    def _load_tile_images(self):
+        """Load and scale tree, wheat, metal, and gold images for rendering"""
+        tree_images = []
+        wheat_images = []
+        metal_images = []
+        gold_images = []
+        assets_path = os.path.join("client", "assets", "tiles")
+
+        # Load tree images (tree_0.png to tree_3.png)
+        for i in range(4):
+            try:
+                image_path = os.path.join(assets_path, f"tree_{i}.png")
+                image = pygame.image.load(image_path).convert_alpha()
+
+                # Scale image to fit tile size while maintaining aspect ratio
+                # Make image fill most of the tile width, height can extend above
+                target_width = int(TILE_SIZE * 0.9)  # 90% of tile width
+                aspect_ratio = image.get_height() / image.get_width()
+                target_height = int(target_width * aspect_ratio)
+
+                scaled_image = pygame.transform.scale(
+                    image, (target_width, target_height)
+                )
+                tree_images.append(scaled_image)
+            except pygame.error as e:
+                print(f"Warning: Could not load tree_{i}.png: {e}")
+                # Fallback to colored rectangle if image fails to load
+                fallback_surface = pygame.Surface((TILE_SIZE, TILE_SIZE))
+                fallback_surface.fill(COLORS["DARK_GREEN"])
+                tree_images.append(fallback_surface)
+
+        # Load wheat images (wheat_0.png to wheat_2.png)
+        for i in range(3):
+            try:
+                image_path = os.path.join(assets_path, f"wheat_{i}.png")
+                image = pygame.image.load(image_path).convert_alpha()
+
+                # Scale image to fit tile size while maintaining aspect ratio
+                target_width = int(TILE_SIZE * 0.9)  # 90% of tile width
+                aspect_ratio = image.get_height() / image.get_width()
+                target_height = int(target_width * aspect_ratio)
+
+                scaled_image = pygame.transform.scale(
+                    image, (target_width, target_height)
+                )
+                wheat_images.append(scaled_image)
+            except pygame.error as e:
+                print(f"Warning: Could not load wheat_{i}.png: {e}")
+                # Fallback to colored rectangle if image fails to load
+                fallback_surface = pygame.Surface((TILE_SIZE, TILE_SIZE))
+                fallback_surface.fill(COLORS["YELLOW"])
+                wheat_images.append(fallback_surface)
+
+        # Load metal images (metal_0.png to metal_2.png)
+        for i in range(1):
+            try:
+                image_path = os.path.join(assets_path, f"metal_{i}.png")
+                image = pygame.image.load(image_path).convert_alpha()
+
+                # Scale image to fit tile size
+                scaled_image = pygame.transform.scale(image, (TILE_SIZE, TILE_SIZE))
+                metal_images.append(scaled_image)
+            except pygame.error as e:
+                print(f"Warning: Could not load metal_{i}.png: {e}")
+                # Fallback to colored rectangle if image fails to load
+                fallback_surface = pygame.Surface((TILE_SIZE, TILE_SIZE))
+                fallback_surface.fill(COLORS["GRAY"])
+                metal_images.append(fallback_surface)
+
+        # Load gold images (gold_0.png to gold_2.png)
+        for i in range(1):
+            try:
+                image_path = os.path.join(assets_path, f"gold_{i}.png")
+                image = pygame.image.load(image_path).convert_alpha()
+
+                # Scale image to fit tile size
+                scaled_image = pygame.transform.scale(image, (TILE_SIZE, TILE_SIZE))
+                gold_images.append(scaled_image)
+            except pygame.error as e:
+                print(f"Warning: Could not load gold_{i}.png: {e}")
+                # Fallback to colored rectangle if image fails to load
+                fallback_surface = pygame.Surface((TILE_SIZE, TILE_SIZE))
+                fallback_surface.fill(COLORS["YELLOW"])
+                gold_images.append(fallback_surface)
+
+        return tree_images, wheat_images, metal_images, gold_images
+
+    def _get_tree_image_index(self, x: int, y: int) -> int:
+        """Get deterministic tree image index based on tile position"""
+        # Use a simple hash function to get consistent random selection
+        return (x * 7 + y * 13) % len(self.tree_images)
+
+    def _get_wheat_image_index(self, x: int, y: int) -> int:
+        """Get deterministic wheat image index based on tile position"""
+        # Use a different hash function to get different distribution than trees
+        return (x * 11 + y * 17) % len(self.wheat_images)
+
+    def _get_metal_image_index(self, x: int, y: int) -> int:
+        """Get deterministic metal image index based on tile position"""
+        # Use another hash function to get different distribution
+        return (x * 19 + y * 23) % len(self.metal_images)
+
+    def _get_gold_image_index(self, x: int, y: int) -> int:
+        """Get deterministic gold image index based on tile position"""
+        # Use yet another hash function to get different distribution
+        return (x * 29 + y * 31) % len(self.gold_images)
 
     def handle_event(self, event: pygame.event.Event):
         if event.type == pygame.KEYDOWN:
@@ -152,6 +269,10 @@ class GameScene:
                 )
             elif event.key == pygame.K_r:  # R to hide all gathering ranges
                 self.hide_all_gathering_ranges = not self.hide_all_gathering_ranges
+            elif event.key == pygame.K_F1:  # F1 to toggle grid overlay
+                self.show_grid = not self.show_grid
+            elif event.key == pygame.K_F2:  # F2 to toggle waypoint visualization
+                self.show_waypoints = not self.show_waypoints
             elif event.key in self.keys_pressed:
                 self.keys_pressed[event.key] = True
 
@@ -224,14 +345,18 @@ class GameScene:
 
                     tile_x = int(position.x // TILE_SIZE)
                     tile_y = int(position.y // TILE_SIZE)
+                    # Convert to pixel coordinates for server
+                    pixel_x = tile_x * TILE_SIZE
+                    pixel_y = tile_y * TILE_SIZE
 
                     if is_valid:  # Hero is adjacent - instant build
+                        print(f"[CLIENT DEBUG] 📦 Sending instant build: {building_type.value} at pixel coords ({pixel_x}, {pixel_y})")
                         asyncio.create_task(
                             self.network_manager.send_game_action(
                                 {
                                     "type": "build",
                                     "building_type": building_type.value,
-                                    "position": {"x": tile_x, "y": tile_y},
+                                    "position": {"x": pixel_x, "y": pixel_y},
                                 }
                             )
                         )
@@ -242,7 +367,7 @@ class GameScene:
                         self.pending_build = {
                             "type": "build",
                             "building_type": building_type.value,
-                            "position": {"x": tile_x, "y": tile_y},
+                            "position": {"x": pixel_x, "y": pixel_y},
                         }
                         # Place fixed preview on map at click position
                         self.building_placer.place_preview_on_map(
@@ -662,6 +787,12 @@ class GameScene:
                     )
 
         self.game_state = GameState(**data["game_state"])
+        
+        # Debug: Check if buildings are received
+        print(f"[DEBUG {timestamp:.3f}] Buildings received: {len(self.game_state.buildings)}")
+        for building_id, building in self.game_state.buildings.items():
+            print(f"[DEBUG {timestamp:.3f}] Building: {building_id} - {building.building_type.value} at ({building.position.x}, {building.position.y})")
+        
         self._update_fog_of_war()
 
         # Check if hero reached pending build location
@@ -765,6 +896,11 @@ class GameScene:
         self._render_fog_of_war(screen)
         # Render heroes AFTER fog of war so they're always visible
         self._render_heroes(screen)
+        # Render debug overlays
+        if self.show_grid:
+            self._render_grid(screen)
+        if self.show_waypoints:
+            self._render_waypoints(screen)
         # Render pings on top of everything else in the game world
         self._render_pings(screen)
         # Render attack effects on top of everything else
@@ -918,29 +1054,106 @@ class GameScene:
                     # Check if tile is explored - if not, show basic black terrain
                     if self._is_tile_explored(x, y):
                         # Show actual tile type with resources
-                        color = self.tile_colors.get(tile_type, COLORS["BLACK"])
+                        if tile_type == TileType.WOOD:
+                            # Draw the tree image directly without background
+                            tree_index = self._get_tree_image_index(x, y)
+                            tree_image = self.tree_images[tree_index]
+
+                            # Position image: center horizontally, align bottom with tile bottom
+                            rect = pygame.Rect(
+                                x * TILE_SIZE - int(self.camera_x),
+                                y * TILE_SIZE - int(self.camera_y),
+                                TILE_SIZE,
+                                TILE_SIZE,
+                            )
+                            image_x = rect.x + (TILE_SIZE - tree_image.get_width()) // 2
+                            image_y = rect.y + TILE_SIZE - tree_image.get_height()
+
+                            screen.blit(tree_image, (image_x, image_y))
+                        elif tile_type == TileType.WHEAT:
+                            # Draw the wheat image directly without background
+                            wheat_index = self._get_wheat_image_index(x, y)
+                            wheat_image = self.wheat_images[wheat_index]
+
+                            # Position image: center horizontally, align bottom with tile bottom
+                            rect = pygame.Rect(
+                                x * TILE_SIZE - int(self.camera_x),
+                                y * TILE_SIZE - int(self.camera_y),
+                                TILE_SIZE,
+                                TILE_SIZE,
+                            )
+                            image_x = (
+                                rect.x + (TILE_SIZE - wheat_image.get_width()) // 2
+                            )
+                            image_y = rect.y + TILE_SIZE - wheat_image.get_height()
+
+                            screen.blit(wheat_image, (image_x, image_y))
+                        elif tile_type == TileType.METAL:
+                            # Draw the metal ore image
+                            metal_index = self._get_metal_image_index(x, y)
+                            metal_image = self.metal_images[metal_index]
+
+                            # Position image: center on tile
+                            rect = pygame.Rect(
+                                x * TILE_SIZE - int(self.camera_x),
+                                y * TILE_SIZE - int(self.camera_y),
+                                TILE_SIZE,
+                                TILE_SIZE,
+                            )
+
+                            screen.blit(metal_image, (rect.x, rect.y))
+                        elif tile_type == TileType.GOLD:
+                            # Draw the gold ore image
+                            gold_index = self._get_gold_image_index(x, y)
+                            gold_image = self.gold_images[gold_index]
+
+                            # Position image: center on tile
+                            rect = pygame.Rect(
+                                x * TILE_SIZE - int(self.camera_x),
+                                y * TILE_SIZE - int(self.camera_y),
+                                TILE_SIZE,
+                                TILE_SIZE,
+                            )
+
+                            screen.blit(gold_image, (rect.x, rect.y))
+                        else:
+                            # Regular colored tile for other resource tiles
+                            color = self.tile_colors.get(tile_type, COLORS["BLACK"])
+                            rect = pygame.Rect(
+                                x * TILE_SIZE - int(self.camera_x),
+                                y * TILE_SIZE - int(self.camera_y),
+                                TILE_SIZE,
+                                TILE_SIZE,
+                            )
+                            pygame.draw.rect(screen, color, rect)
                     else:
                         # For unexplored areas, show basic black terrain (fog will cover this)
                         color = COLORS["BLACK"]
-
-                    rect = pygame.Rect(
-                        x * TILE_SIZE - int(self.camera_x),
-                        y * TILE_SIZE - int(self.camera_y),
-                        TILE_SIZE,
-                        TILE_SIZE,
-                    )
-                    pygame.draw.rect(screen, color, rect)
+                        rect = pygame.Rect(
+                            x * TILE_SIZE - int(self.camera_x),
+                            y * TILE_SIZE - int(self.camera_y),
+                            TILE_SIZE,
+                            TILE_SIZE,
+                        )
+                        pygame.draw.rect(screen, color, rect)
 
     def _render_buildings(self, screen: pygame.Surface):
+        print(f"[RENDER DEBUG] Rendering {len(self.game_state.buildings)} buildings")
         for building in self.game_state.buildings.values():
+            print(f"[RENDER DEBUG] Building: {building.building_type.value} at ({building.position.x}, {building.position.y})")
+            # Convert building pixel coordinates to tile coordinates for _world_to_screen
+            building_tile_x = building.position.x // TILE_SIZE
+            building_tile_y = building.position.y // TILE_SIZE
             screen_pos = self._world_to_screen(
-                (building.position.x, building.position.y)
+                (building_tile_x, building_tile_y)
             )
+            print(f"[RENDER DEBUG] Screen position: {screen_pos}")
 
             if (
                 -TILE_SIZE < screen_pos[0] < screen.get_width()
                 and -TILE_SIZE < screen_pos[1] < screen.get_height()
             ):
+                print(f"[RENDER DEBUG] Building is visible, drawing...")
                 width = building.size[0] * TILE_SIZE
                 height = building.size[1] * TILE_SIZE
 
@@ -955,64 +1168,74 @@ class GameScene:
                 rect = pygame.Rect(screen_pos[0], screen_pos[1], width, height)
                 pygame.draw.rect(screen, color, rect)
                 pygame.draw.rect(screen, COLORS["WHITE"], rect, 2)
+            else:
+                print(f"[RENDER DEBUG] Building not visible (screen bounds: {screen.get_width()}x{screen.get_height()})")
 
     def _render_gathering_ranges(self, screen: pygame.Surface):
         """Render gathering ranges for resource buildings"""
         from shared.models.game_models import BuildingType
-        
+
         # Define which building types are resource buildings
         resource_building_types = {
             BuildingType.FARM,
-            BuildingType.WOOD_CUTTER, 
+            BuildingType.WOOD_CUTTER,
             BuildingType.MINE,
-            BuildingType.GOLD_MINE
+            BuildingType.GOLD_MINE,
         }
-        
+
         # Check if any resource building is selected (this will show ranges for all resource buildings)
         has_selected_resource_building = False
         if self.selected_entity:
-            building_type = getattr(self.selected_entity, 'building_type', None)
+            building_type = getattr(self.selected_entity, "building_type", None)
             has_selected_resource_building = building_type in resource_building_types
-        
+
         if has_selected_resource_building:
             for building in self.game_state.buildings.values():
                 if building.building_type not in resource_building_types:
                     continue
-                    
+
                 if building.health <= 0:  # Skip destroyed buildings
                     continue
-                
-                is_selected = (self.selected_entity and 
-                             hasattr(self.selected_entity, 'id') and 
-                             self.selected_entity.id == building.id)
-                
+
+                is_selected = (
+                    self.selected_entity
+                    and hasattr(self.selected_entity, "id")
+                    and self.selected_entity.id == building.id
+                )
+
                 self._render_single_gathering_range(screen, building, bool(is_selected))
 
-    def _render_single_gathering_range(self, screen: pygame.Surface, building, is_selected: bool = False):
+    def _render_single_gathering_range(
+        self, screen: pygame.Surface, building, is_selected: bool = False
+    ):
         """Render gathering range for a single building"""
         # Calculate the gathering range area (5x5 tiles around building)
         range_size = 2  # 2 tiles in each direction (5x5 total)
-        
+
         # Calculate the range boundaries in world coordinates
         range_left = building.position.x - range_size
         range_top = building.position.y - range_size
         range_right = building.position.x + building.size[0] + range_size
         range_bottom = building.position.y + building.size[1] + range_size
-        
+
         # Convert to screen coordinates
         screen_left = int(range_left * TILE_SIZE - self.camera_x)
         screen_top = int(range_top * TILE_SIZE - self.camera_y)
         screen_right = int(range_right * TILE_SIZE - self.camera_x)
         screen_bottom = int(range_bottom * TILE_SIZE - self.camera_y)
-        
+
         # Only render if visible on screen
-        if (screen_right > 0 and screen_left < screen.get_width() and 
-            screen_bottom > 0 and screen_top < screen.get_height()):
-            
+        if (
+            screen_right > 0
+            and screen_left < screen.get_width()
+            and screen_bottom > 0
+            and screen_top < screen.get_height()
+        ):
+
             # Create a transparent white surface for the range area
             range_width = screen_right - screen_left
             range_height = screen_bottom - screen_top
-            
+
             if range_width > 0 and range_height > 0:
                 # Use different opacity and color for selected vs all buildings
                 if is_selected:
@@ -1025,49 +1248,67 @@ class GameScene:
                     fill_color = (255, 255, 255, 30)  # White with very low alpha
                     border_color = (255, 255, 255, 100)  # White border
                     border_width = 2
-                
+
                 # Create surface with transparent fill
-                range_surface = pygame.Surface((range_width, range_height), pygame.SRCALPHA)
+                range_surface = pygame.Surface(
+                    (range_width, range_height), pygame.SRCALPHA
+                )
                 range_surface.fill(fill_color)
-                
+
                 # Draw the filled area
                 screen.blit(range_surface, (screen_left, screen_top))
-                
-                # Draw dotted border around the range
-                self._draw_dotted_rect(screen, (screen_left, screen_top, range_width, range_height), 
-                                     border_color, border_width, 8)
 
-    def _draw_dotted_rect(self, surface: pygame.Surface, rect: tuple, color: tuple, width: int, dot_length: int):
+                # Draw dotted border around the range
+                self._draw_dotted_rect(
+                    screen,
+                    (screen_left, screen_top, range_width, range_height),
+                    border_color,
+                    border_width,
+                    8,
+                )
+
+    def _draw_dotted_rect(
+        self,
+        surface: pygame.Surface,
+        rect: tuple,
+        color: tuple,
+        width: int,
+        dot_length: int,
+    ):
         """Draw a dotted rectangle border"""
         x, y, w, h = rect
-        
+
         # Draw dotted top edge
         for i in range(0, w, dot_length * 2):
             start_x = x + i
             end_x = min(x + i + dot_length, x + w)
             if start_x < end_x:
                 pygame.draw.line(surface, color[:3], (start_x, y), (end_x, y), width)
-        
-        # Draw dotted bottom edge  
+
+        # Draw dotted bottom edge
         for i in range(0, w, dot_length * 2):
             start_x = x + i
             end_x = min(x + i + dot_length, x + w)
             if start_x < end_x:
-                pygame.draw.line(surface, color[:3], (start_x, y + h), (end_x, y + h), width)
-        
+                pygame.draw.line(
+                    surface, color[:3], (start_x, y + h), (end_x, y + h), width
+                )
+
         # Draw dotted left edge
         for i in range(0, h, dot_length * 2):
             start_y = y + i
             end_y = min(y + i + dot_length, y + h)
             if start_y < end_y:
                 pygame.draw.line(surface, color[:3], (x, start_y), (x, end_y), width)
-        
+
         # Draw dotted right edge
         for i in range(0, h, dot_length * 2):
             start_y = y + i
             end_y = min(y + i + dot_length, y + h)
             if start_y < end_y:
-                pygame.draw.line(surface, color[:3], (x + w, start_y), (x + w, end_y), width)
+                pygame.draw.line(
+                    surface, color[:3], (x + w, start_y), (x + w, end_y), width
+                )
 
     def _render_heroes(self, screen: pygame.Surface):
         font = pygame.font.Font(None, 20)
@@ -1359,6 +1600,117 @@ class GameScene:
         )
         screen.blit(quit_text, quit_rect)
 
+    def _render_grid(self, screen: pygame.Surface):
+        """Render the pathfinding grid overlay"""
+        start_x = max(0, int(self.camera_x) // TILE_SIZE)
+        start_y = max(0, int(self.camera_y) // TILE_SIZE)
+        end_x = min(
+            MAP_WIDTH, (int(self.camera_x) + screen.get_width()) // TILE_SIZE + 1
+        )
+        end_y = min(
+            MAP_HEIGHT, (int(self.camera_y) + screen.get_height()) // TILE_SIZE + 1
+        )
+
+        # Draw grid lines
+        grid_color = (100, 100, 100, 128)  # Semi-transparent gray
+
+        # Vertical lines
+        for x in range(start_x, end_x + 1):
+            screen_x = x * TILE_SIZE - int(self.camera_x)
+            if 0 <= screen_x <= screen.get_width():
+                pygame.draw.line(
+                    screen,
+                    grid_color[:3],
+                    (screen_x, 0),
+                    (screen_x, screen.get_height()),
+                    1,
+                )
+
+        # Horizontal lines
+        for y in range(start_y, end_y + 1):
+            screen_y = y * TILE_SIZE - int(self.camera_y)
+            if 0 <= screen_y <= screen.get_height():
+                pygame.draw.line(
+                    screen,
+                    grid_color[:3],
+                    (0, screen_y),
+                    (screen.get_width(), screen_y),
+                    1,
+                )
+
+        # Draw grid center dots to show tile centers
+        dot_color = (150, 150, 150)
+        for y in range(start_y, end_y):
+            for x in range(start_x, end_x):
+                center_x = x * TILE_SIZE + TILE_SIZE // 2 - int(self.camera_x)
+                center_y = y * TILE_SIZE + TILE_SIZE // 2 - int(self.camera_y)
+                if (
+                    0 <= center_x <= screen.get_width()
+                    and 0 <= center_y <= screen.get_height()
+                ):
+                    pygame.draw.circle(screen, dot_color, (center_x, center_y), 2)
+
+    def _render_waypoints(self, screen: pygame.Surface):
+        """Render hero waypoints and paths"""
+        # Check if we have hero paths data from server (we'll need to add this)
+        # For now, let's request this information from the server
+
+        # Draw waypoints for each hero
+        for hero in self.game_state.heroes.values():
+            if hero.player_id == self.network_manager.player_id:
+                # Draw current hero position
+                hero_screen_pos = self._world_to_screen(
+                    (hero.position.x, hero.position.y)
+                )
+                center_x = hero_screen_pos[0] + TILE_SIZE // 2
+                center_y = hero_screen_pos[1] + TILE_SIZE // 2
+
+                # Draw hero position marker
+                pygame.draw.circle(screen, (0, 255, 0), (center_x, center_y), 8, 3)
+
+                # For now, we'll simulate some waypoints to show the system works
+                # In a real implementation, we'd get this from the server
+                if hasattr(hero, "path_waypoints"):
+                    # Draw path waypoints
+                    waypoint_color = (255, 255, 0)  # Yellow
+                    path_color = (255, 255, 0, 128)  # Semi-transparent yellow
+
+                    prev_pos = (center_x, center_y)
+                    for i, waypoint in enumerate(hero.path_waypoints):
+                        waypoint_screen_pos = self._world_to_screen(
+                            (waypoint.x, waypoint.y)
+                        )
+                        wp_x = waypoint_screen_pos[0] + TILE_SIZE // 2
+                        wp_y = waypoint_screen_pos[1] + TILE_SIZE // 2
+
+                        # Draw line to previous waypoint
+                        pygame.draw.line(
+                            screen, path_color[:3], prev_pos, (wp_x, wp_y), 3
+                        )
+
+                        # Draw waypoint marker
+                        pygame.draw.circle(screen, waypoint_color, (wp_x, wp_y), 6)
+
+                        # Draw waypoint number
+                        font = pygame.font.Font(None, 16)
+                        text = font.render(str(i), True, (0, 0, 0))
+                        text_rect = text.get_rect(center=(wp_x, wp_y))
+                        screen.blit(text, text_rect)
+
+                        prev_pos = (wp_x, wp_y)
+
+        # Add debug info about which pathfinding system is being used
+        font = pygame.font.Font(None, 24)
+        debug_text = "Pathfinding Debug: F1=Grid, F2=Waypoints"
+        text_surface = font.render(debug_text, True, (255, 255, 255))
+        text_rect = text_surface.get_rect()
+        text_rect.bottomleft = (10, screen.get_height() - 10)
+
+        # Draw background
+        bg_rect = text_rect.inflate(10, 4)
+        pygame.draw.rect(screen, (0, 0, 0, 180), bg_rect)
+        screen.blit(text_surface, text_rect)
+
     def _check_hero_arrival_for_pending_build(self):
         """Check if hero has arrived at pending build location and auto-build"""
         if not self.pending_build:
@@ -1389,16 +1741,20 @@ class GameScene:
         # Convert coordinates to tiles
         hero_tile_x = int(hero.position.x)  # Hero position is in tile coordinates
         hero_tile_y = int(hero.position.y)
-        building_tile_x = pending_pos["x"]  # Position is already in tile coordinates
-        building_tile_y = pending_pos["y"]
+        # Convert building position from pixels to tiles
+        from shared.constants.game_constants import TILE_SIZE
+        building_tile_x = int(pending_pos["x"] // TILE_SIZE)
+        building_tile_y = int(pending_pos["y"] // TILE_SIZE)
 
         # Check if hero touches any border of the building area
         # Hero needs to be within 1 tile of the building's edge
         is_adjacent = False
+        min_distance_found = float("inf")
         for bx in range(building_tile_x, building_tile_x + size[0]):
             for by in range(building_tile_y, building_tile_y + size[1]):
                 distance = math.sqrt((hero_tile_x - bx) ** 2 + (hero_tile_y - by) ** 2)
-                if distance <= 1.5:  # Hero touches building border
+                min_distance_found = min(min_distance_found, distance)
+                if distance <= 1.8:  # Slightly more lenient to match server threshold
                     is_adjacent = True
                     break
             if is_adjacent:
@@ -1409,6 +1765,9 @@ class GameScene:
             print(
                 f"📍 Hero at ({hero_tile_x}, {hero_tile_y}), Building at ({building_tile_x}, {building_tile_y}) size {size}"
             )
+            print(f"🔍 Min distance found: {min_distance_found:.2f}")
+            print(f"📦 Sending build command: {self.pending_build}")
+            print(f"[CLIENT DEBUG] 🚀 Sending auto-build: {self.pending_build['building_type']} at pixel coords ({self.pending_build['position']['x']}, {self.pending_build['position']['y']})")
             # Send the build command
             asyncio.create_task(
                 self.network_manager.send_game_action(self.pending_build)
@@ -1419,6 +1778,9 @@ class GameScene:
             self.building_placer.stop_placement()
             self.building_menu.clear_selection()
             print("✅ Auto-build command sent and states cleared")
+        else:
+            print(f"❌ Hero NOT adjacent! Distance: {min_distance_found:.2f} (need <= 1.8)")
+            print(f"📍 Hero at ({hero_tile_x}, {hero_tile_y}), Building at ({building_tile_x}, {building_tile_y}) size {size}")
 
     def get_next_scene(self):
         if self.next_scene:

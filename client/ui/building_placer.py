@@ -169,7 +169,7 @@ class BuildingPlacer:
         for bx in range(int(building_tile_x), int(building_tile_x) + size[0]):
             for by in range(int(building_tile_y), int(building_tile_y) + size[1]):
                 distance = math.sqrt((hero_tile_x - bx) ** 2 + (hero_tile_y - by) ** 2)
-                if distance <= 1.5:  # Allow diagonal adjacency
+                if distance <= 1.8:  # Slightly more lenient to match server threshold
                     return True
 
         # Debug info
