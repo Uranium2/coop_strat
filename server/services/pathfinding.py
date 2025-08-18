@@ -68,43 +68,50 @@ class Pathfinder:
 
         # Hero collision radius - same as used in game_manager.py
         collision_radius = 0.4
-        
+
         # Check if the hero (with collision radius) would fit at this tile center
         hero_center_x = x + 0.5  # Tile center
         hero_center_y = y + 0.5
-        
+
         # Check all tiles that the hero's collision box would overlap
         min_check_x = int(hero_center_x - collision_radius)
         max_check_x = int(hero_center_x + collision_radius) + 1
         min_check_y = int(hero_center_y - collision_radius)
         max_check_y = int(hero_center_y + collision_radius) + 1
-        
+
         for check_y in range(min_check_y, max_check_y):
             for check_x in range(min_check_x, max_check_x):
                 # Check if this tile is within collision radius
                 tile_center_x = check_x + 0.5
                 tile_center_y = check_y + 0.5
-                
+
                 # Calculate overlap between hero's collision box and this tile
                 hero_left = hero_center_x - collision_radius
                 hero_right = hero_center_x + collision_radius
                 hero_top = hero_center_y - collision_radius
                 hero_bottom = hero_center_y + collision_radius
-                
+
                 tile_left = check_x
                 tile_right = check_x + 1
-                tile_top = check_y  
+                tile_top = check_y
                 tile_bottom = check_y + 1
-                
+
                 # Check if hero's collision box overlaps this tile
-                if (hero_right > tile_left and hero_left < tile_right and 
-                    hero_bottom > tile_top and hero_top < tile_bottom):
-                    
+                if (
+                    hero_right > tile_left
+                    and hero_left < tile_right
+                    and hero_bottom > tile_top
+                    and hero_top < tile_bottom
+                ):
                     # Check if this overlapping tile is blocked
-                    if (check_x < 0 or check_x >= self.map_width or 
-                        check_y < 0 or check_y >= self.map_height):
+                    if (
+                        check_x < 0
+                        or check_x >= self.map_width
+                        or check_y < 0
+                        or check_y >= self.map_height
+                    ):
                         return False
-                        
+
                     tile_type = game_state.map_data[check_y][check_x]
                     if tile_type in [TileType.WOOD, TileType.WALL]:
                         return False
@@ -119,8 +126,14 @@ class Pathfinder:
             width, height = building.size
 
             # Expand building bounds by collision radius
-            if (building_x - collision_radius <= hero_center_x <= building_x + width + collision_radius and
-                building_y - collision_radius <= hero_center_y <= building_y + height + collision_radius):
+            if (
+                building_x - collision_radius
+                <= hero_center_x
+                <= building_x + width + collision_radius
+                and building_y - collision_radius
+                <= hero_center_y
+                <= building_y + height + collision_radius
+            ):
                 return False
 
         return True
@@ -247,13 +260,15 @@ class Pathfinder:
             # Add slight offset from tile center for more natural paths
             offset_x = 0.0
             offset_y = 0.0
-            
+
             # Only offset intermediate waypoints, not start/end
             if current.parent and current != goal_node:
                 # Small random offset (±0.2 from center) to avoid perfectly grid-aligned movement
-                offset_x = ((current.x * 17 + current.y * 23) % 41 - 20) * 0.01  # Deterministic "random"
+                offset_x = (
+                    (current.x * 17 + current.y * 23) % 41 - 20
+                ) * 0.01  # Deterministic "random"
                 offset_y = ((current.x * 31 + current.y * 13) % 37 - 18) * 0.01
-                
+
             x = float(current.x + 0.5 + offset_x)
             y = float(current.y + 0.5 + offset_y)
             raw_path.append(Position(x=x, y=y))
@@ -272,21 +287,21 @@ class Pathfinder:
         # Apply simple path smoothing by removing redundant waypoints
         if len(raw_path) <= 2:
             return raw_path
-            
+
         return self._smooth_path_simple(raw_path)
 
     def _smooth_path_simple(self, path: List[Position]) -> List[Position]:
         """Simple path smoothing by removing waypoints that are nearly collinear"""
         if len(path) <= 2:
             return path
-            
+
         smoothed = [path[0]]  # Always keep start point
-        
+
         i = 0
         while i < len(path) - 1:
             # Look ahead to see if we can skip intermediate waypoints
             j = i + 1
-            
+
             # Try to extend the line as far as possible
             while j < len(path) - 1:
                 # Check if the three points are roughly collinear
@@ -294,38 +309,42 @@ class Pathfinder:
                     j += 1
                 else:
                     break
-                    
+
             # Add the furthest point we can reach in a straight line
             smoothed.append(path[j])
             i = j
-            
+
         return smoothed
-        
-    def _are_points_roughly_collinear(self, p1: Position, p2: Position, p3: Position) -> bool:
+
+    def _are_points_roughly_collinear(
+        self, p1: Position, p2: Position, p3: Position
+    ) -> bool:
         """Check if three points are roughly in a straight line"""
         # Calculate vectors
         v1_x = p2.x - p1.x
         v1_y = p2.y - p1.y
         v2_x = p3.x - p2.x
         v2_y = p3.y - p2.y
-        
+
         # If either vector is very short, consider them collinear
-        if (abs(v1_x) < 0.1 and abs(v1_y) < 0.1) or (abs(v2_x) < 0.1 and abs(v2_y) < 0.1):
+        if (abs(v1_x) < 0.1 and abs(v1_y) < 0.1) or (
+            abs(v2_x) < 0.1 and abs(v2_y) < 0.1
+        ):
             return True
-            
+
         # Calculate cross product (measures how "perpendicular" the vectors are)
         cross_product = abs(v1_x * v2_y - v1_y * v2_x)
-        
+
         # Calculate the magnitudes
         mag1 = (v1_x * v1_x + v1_y * v1_y) ** 0.5
         mag2 = (v2_x * v2_x + v2_y * v2_y) ** 0.5
-        
+
         if mag1 < 0.01 or mag2 < 0.01:
             return True
-            
+
         # Normalize the cross product by the magnitudes
         normalized_cross = cross_product / (mag1 * mag2)
-        
+
         # If the normalized cross product is small, the vectors are nearly parallel
         return normalized_cross < 0.3  # Adjust this threshold for more/less smoothing
 

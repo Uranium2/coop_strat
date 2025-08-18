@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
 
 import asyncio
-import time
-import uuid
-from typing import Dict
 
 import pygame
 
+from server.services.game_manager import GameManager
 from shared.models.game_models import (
-    Hero,
+    BuildingType,
+    HeroType,
     Player,
     Position,
-    BuildingType,
     Resources,
-    HeroType,
 )
-from server.services.game_manager import GameManager
 
 
 async def test_building_placement():
@@ -53,12 +49,22 @@ async def test_building_placement():
 
     # Test Case 1: Try to build right next to hero (should work)
     build_position = Position(x=6 * 32, y=5 * 32)  # Convert to pixel coordinates
-    print(f"🏗️ Attempting to build FARM at pixel position ({build_position.x}, {build_position.y})")
-    print(f"🏗️ This is tile position ({build_position.x // 32}, {build_position.y // 32})")
-    print(f"🏗️ Hero at tile ({hero.position.x}, {hero.position.y}), building at tile ({build_position.x // 32}, {build_position.y // 32})")
-    print(f"🏗️ Expected distance from hero (5,5) to building tile (6,5): {((5 - 6) ** 2 + (5 - 5) ** 2) ** 0.5:.2f}")
+    print(
+        f"🏗️ Attempting to build FARM at pixel position ({build_position.x}, {build_position.y})"
+    )
+    print(
+        f"🏗️ This is tile position ({build_position.x // 32}, {build_position.y // 32})"
+    )
+    print(
+        f"🏗️ Hero at tile ({hero.position.x}, {hero.position.y}), building at tile ({build_position.x // 32}, {build_position.y // 32})"
+    )
+    print(
+        f"🏗️ Expected distance from hero (5,5) to building tile (6,5): {((5 - 6) ** 2 + (5 - 5) ** 2) ** 0.5:.2f}"
+    )
 
-    result = game_manager.build_structure("test_player", BuildingType.FARM, build_position)
+    result = game_manager.build_structure(
+        "test_player", BuildingType.FARM, build_position
+    )
     print(f"✅ Build result: {result}")
 
     if result:
@@ -69,11 +75,15 @@ async def test_building_placement():
     # Move hero to the exact building location
     hero.position = Position(x=6.0, y=5.0)
     print(f"🚶 Moved hero to ({hero.position.x}, {hero.position.y})")
-    print(f"🏗️ Expected distance from hero (6,5) to building tile (6,5): {((6 - 6) ** 2 + (5 - 5) ** 2) ** 0.5:.2f}")
-    
-    result2 = game_manager.build_structure("test_player", BuildingType.FARM, build_position)
+    print(
+        f"🏗️ Expected distance from hero (6,5) to building tile (6,5): {((6 - 6) ** 2 + (5 - 5) ** 2) ** 0.5:.2f}"
+    )
+
+    result2 = game_manager.build_structure(
+        "test_player", BuildingType.FARM, build_position
+    )
     print(f"✅ Build result with hero at building position: {result2}")
-    
+
     if result2:
         print("🎉 Building placement worked after moving hero!")
         return
@@ -82,12 +92,14 @@ async def test_building_placement():
     # Test each tile of the 2x2 building
     building_tile_x = int(build_position.x // 32)
     building_tile_y = int(build_position.y // 32)
-    
+
     for bx in range(building_tile_x, building_tile_x + 2):
         for by in range(building_tile_y, building_tile_y + 2):
             hero.position = Position(x=float(bx), y=float(by))
             print(f"🚶 Testing with hero at tile ({bx}, {by})")
-            result3 = game_manager.build_structure("test_player", BuildingType.FARM, build_position)
+            result3 = game_manager.build_structure(
+                "test_player", BuildingType.FARM, build_position
+            )
             print(f"✅ Build result with hero at ({bx}, {by}): {result3}")
             if result3:
                 print(f"🎉 Building placement worked with hero at ({bx}, {by})!")
@@ -97,12 +109,13 @@ async def test_building_placement():
 if __name__ == "__main__":
     pygame.init()
     screen = pygame.display.set_mode((800, 600))
-    
+
     try:
         asyncio.run(test_building_placement())
     except Exception as e:
         print(f"❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         pygame.quit()

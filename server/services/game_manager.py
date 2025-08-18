@@ -1,30 +1,8 @@
 import logging
 import time
 import uuid
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple
 
-from shared.constants.game_constants import (
-    BUILDING_TYPES,
-    ENEMY_TYPES,
-    MAP_HEIGHT,
-    MAP_WIDTH,
-    TILE_SIZE,
-)
-from shared.models.game_models import (
-    AttackEffect,
-    Building,
-    BuildingType,
-    Enemy,
-    GameOverReason,
-    GameState,
-    Hero,
-    Ping,
-    Player,
-    Position,
-    Resources,
-    TileType,
-    Unit,
-)
 from server.services.combat_service import CombatService
 from server.services.map_generator import MapGenerator
 from server.services.map_loader import MapLoader
@@ -38,6 +16,7 @@ from shared.constants.game_constants import (
     MAP_HEIGHT,
     MAP_WIDTH,
     RESOURCE_TICK_RATE,
+    TILE_SIZE,
     WAVE_SPAWN_INTERVAL,
 )
 from shared.models.game_models import (
@@ -92,12 +71,12 @@ class GameManager:
         self.combat_service = CombatService()
 
         # Movement and tick system
-        self.hero_targets: Dict[str, MovementTarget] = (
-            {}
-        )  # Store movement targets for heroes
-        self.hero_paths: Dict[str, List[Position]] = (
-            {}
-        )  # Store current paths for heroes
+        self.hero_targets: Dict[
+            str, MovementTarget
+        ] = {}  # Store movement targets for heroes
+        self.hero_paths: Dict[
+            str, List[Position]
+        ] = {}  # Store current paths for heroes
         self.hero_stuck_detection: Dict[str, Dict] = {}  # Track stuck heroes
         self.last_update = time.time()
         self.tick_rate = 60  # 60 FPS server tick rate
@@ -126,7 +105,9 @@ class GameManager:
                 self.game_state.buildings[town_hall_id] = Building(
                     id=town_hall_id,
                     building_type=BuildingType.TOWN_HALL,
-                    position=Position(x=center_x * TILE_SIZE, y=center_y * TILE_SIZE),  # Convert to pixel coordinates
+                    position=Position(
+                        x=center_x * TILE_SIZE, y=center_y * TILE_SIZE
+                    ),  # Convert to pixel coordinates
                     health=1000,
                     max_health=1000,
                     player_id="shared",
@@ -166,7 +147,9 @@ class GameManager:
         self.game_state.buildings[town_hall_id] = Building(
             id=town_hall_id,
             building_type=BuildingType.TOWN_HALL,
-            position=Position(x=center_x * TILE_SIZE, y=center_y * TILE_SIZE),  # Convert to pixel coordinates
+            position=Position(
+                x=center_x * TILE_SIZE, y=center_y * TILE_SIZE
+            ),  # Convert to pixel coordinates
             health=1000,
             max_health=1000,
             player_id="shared",
@@ -181,7 +164,7 @@ class GameManager:
         ]
 
         self._spawn_heroes(hero_positions)
-        logger.info(f"Game initialized with generated map")
+        logger.info("Game initialized with generated map")
 
     def _spawn_heroes(self, hero_positions: List[Tuple[int, int]]):
         """Spawn heroes at given positions and complete game initialization"""

@@ -225,7 +225,9 @@ async def handle_message(player_id: str, message: dict):
     elif message_type == "start_game":
         lobby_id = manager.player_lobbies.get(player_id)
         map_file = message.get("map_file", None)  # Optional map file
-        logger.info(f"Player {player_id} requesting to start game in lobby {lobby_id} with map: {map_file or 'generated'}")
+        logger.info(
+            f"Player {player_id} requesting to start game in lobby {lobby_id} with map: {map_file or 'generated'}"
+        )
 
         if lobby_id:
             lobby = lobby_manager.get_lobby(lobby_id)
@@ -233,7 +235,9 @@ async def handle_message(player_id: str, message: dict):
                 logger.info(f"Starting game for lobby {lobby_id}")
                 try:
                     lobby.start_game()  # Mark lobby as active
-                    game_manager = GameManager(lobby_id, lobby.players, custom_map=map_file)
+                    game_manager = GameManager(
+                        lobby_id, lobby.players, custom_map=map_file
+                    )
                     game_managers[lobby_id] = game_manager
                     initial_state = game_manager.get_game_state()
 
@@ -378,18 +382,24 @@ async def handle_game_action(lobby_id: str, player_id: str, action: dict):
         from shared.models.game_models import BuildingType, Position
 
         position = Position(x=position_data["x"], y=position_data["y"])
-        logger.info(f"[BUILD DEBUG] Received build request: {building_type} at ({position.x}, {position.y})")
+        logger.info(
+            f"[BUILD DEBUG] Received build request: {building_type} at ({position.x}, {position.y})"
+        )
 
         if game_manager.build_structure(
             player_id, BuildingType(building_type), position
         ):
-            logger.info(f"[BUILD DEBUG] ✅ Building {building_type} placed successfully for {player_id}")
+            logger.info(
+                f"[BUILD DEBUG] ✅ Building {building_type} placed successfully for {player_id}"
+            )
             updated_state = game_manager.get_game_state()
             await manager.send_to_lobby(
                 lobby_id, {"type": "game_update", "game_state": updated_state.dict()}
             )
         else:
-            logger.warning(f"[BUILD DEBUG] ❌ Failed to build {building_type} for {player_id}")
+            logger.warning(
+                f"[BUILD DEBUG] ❌ Failed to build {building_type} for {player_id}"
+            )
 
     elif action_type == "toggle_pause":
         if game_manager.toggle_pause():

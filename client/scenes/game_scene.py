@@ -350,7 +350,9 @@ class GameScene:
                     pixel_y = tile_y * TILE_SIZE
 
                     if is_valid:  # Hero is adjacent - instant build
-                        print(f"[CLIENT DEBUG] 📦 Sending instant build: {building_type.value} at pixel coords ({pixel_x}, {pixel_y})")
+                        print(
+                            f"[CLIENT DEBUG] 📦 Sending instant build: {building_type.value} at pixel coords ({pixel_x}, {pixel_y})"
+                        )
                         asyncio.create_task(
                             self.network_manager.send_game_action(
                                 {
@@ -375,19 +377,73 @@ class GameScene:
                         )
                         # Disable cursor preview so it doesn't follow mouse
                         self.building_placer.is_cursor_preview = False
-                        # Send hero to building location
-                        asyncio.create_task(
-                            self.network_manager.send_game_action(
-                                {
-                                    "type": "move_hero",
-                                    "target_position": {"x": tile_x, "y": tile_y},
-                                }
-                            )
-                        )
-                        self.building_placer.set_hero_traveling(True)
-                        print(
-                            f"🚶 Hero traveling to build {building_type.value} at ({tile_x}, {tile_y})"
-                        )
+
+                        # Calculate a better target position at the building boundary
+                        hero = self._get_player_hero()
+                        if hero:
+                            # Get building info for size
+                            from shared.constants.game_constants import BUILDING_TYPES
+
+                            building_info = BUILDING_TYPES.get(building_type.value)
+                            if building_info:
+                                size = building_info["size"]
+
+                                # Calculate which edge of the building is closest to the hero
+                                hero_tile_x = int(hero.position.x)
+                                hero_tile_y = int(hero.position.y)
+
+                                # Find the closest point on the building perimeter
+                                building_left = tile_x
+                                building_right = tile_x + size[0] - 1
+                                building_top = tile_y
+                                building_bottom = tile_y + size[1] - 1
+
+                                # Determine which side of the building to approach
+                                if hero_tile_x < building_left:  # Hero is to the left
+                                    target_x = (
+                                        building_left - 1
+                                    )  # Just outside left edge
+                                    target_y = max(
+                                        building_top, min(building_bottom, hero_tile_y)
+                                    )
+                                elif (
+                                    hero_tile_x > building_right
+                                ):  # Hero is to the right
+                                    target_x = (
+                                        building_right + 1
+                                    )  # Just outside right edge
+                                    target_y = max(
+                                        building_top, min(building_bottom, hero_tile_y)
+                                    )
+                                elif hero_tile_y < building_top:  # Hero is above
+                                    target_x = max(
+                                        building_left, min(building_right, hero_tile_x)
+                                    )
+                                    target_y = building_top - 1  # Just outside top edge
+                                else:  # Hero is below
+                                    target_x = max(
+                                        building_left, min(building_right, hero_tile_x)
+                                    )
+                                    target_y = (
+                                        building_bottom + 1
+                                    )  # Just outside bottom edge
+
+                                # Send hero to calculated boundary position
+                                asyncio.create_task(
+                                    self.network_manager.send_game_action(
+                                        {
+                                            "type": "move_hero",
+                                            "target_position": {
+                                                "x": target_x,
+                                                "y": target_y,
+                                            },
+                                        }
+                                    )
+                                )
+                                self.building_placer.set_hero_traveling(True)
+                                print(
+                                    f"🚶 Hero traveling to building boundary at ({target_x}, {target_y}) to build {building_type.value}"
+                                )
                         print(
                             f"📍 Fixed preview placed on map at ({position.x}, {position.y})"
                         )
@@ -787,12 +843,16 @@ class GameScene:
                     )
 
         self.game_state = GameState(**data["game_state"])
-        
+
         # Debug: Check if buildings are received
-        print(f"[DEBUG {timestamp:.3f}] Buildings received: {len(self.game_state.buildings)}")
+        print(
+            f"[DEBUG {timestamp:.3f}] Buildings received: {len(self.game_state.buildings)}"
+        )
         for building_id, building in self.game_state.buildings.items():
-            print(f"[DEBUG {timestamp:.3f}] Building: {building_id} - {building.building_type.value} at ({building.position.x}, {building.position.y})")
-        
+            print(
+                f"[DEBUG {timestamp:.3f}] Building: {building_id} - {building.building_type.value} at ({building.position.x}, {building.position.y})"
+            )
+
         self._update_fog_of_war()
 
         # Check if hero reached pending build location
@@ -1140,20 +1200,20 @@ class GameScene:
     def _render_buildings(self, screen: pygame.Surface):
         print(f"[RENDER DEBUG] Rendering {len(self.game_state.buildings)} buildings")
         for building in self.game_state.buildings.values():
-            print(f"[RENDER DEBUG] Building: {building.building_type.value} at ({building.position.x}, {building.position.y})")
+            print(
+                f"[RENDER DEBUG] Building: {building.building_type.value} at ({building.position.x}, {building.position.y})"
+            )
             # Convert building pixel coordinates to tile coordinates for _world_to_screen
             building_tile_x = building.position.x // TILE_SIZE
             building_tile_y = building.position.y // TILE_SIZE
-            screen_pos = self._world_to_screen(
-                (building_tile_x, building_tile_y)
-            )
+            screen_pos = self._world_to_screen((building_tile_x, building_tile_y))
             print(f"[RENDER DEBUG] Screen position: {screen_pos}")
 
             if (
                 -TILE_SIZE < screen_pos[0] < screen.get_width()
                 and -TILE_SIZE < screen_pos[1] < screen.get_height()
             ):
-                print(f"[RENDER DEBUG] Building is visible, drawing...")
+                print("[RENDER DEBUG] Building is visible, drawing...")
                 width = building.size[0] * TILE_SIZE
                 height = building.size[1] * TILE_SIZE
 
@@ -1169,7 +1229,9 @@ class GameScene:
                 pygame.draw.rect(screen, color, rect)
                 pygame.draw.rect(screen, COLORS["WHITE"], rect, 2)
             else:
-                print(f"[RENDER DEBUG] Building not visible (screen bounds: {screen.get_width()}x{screen.get_height()})")
+                print(
+                    f"[RENDER DEBUG] Building not visible (screen bounds: {screen.get_width()}x{screen.get_height()})"
+                )
 
     def _render_gathering_ranges(self, screen: pygame.Surface):
         """Render gathering ranges for resource buildings"""
@@ -1231,7 +1293,6 @@ class GameScene:
             and screen_bottom > 0
             and screen_top < screen.get_height()
         ):
-
             # Create a transparent white surface for the range area
             range_width = screen_right - screen_left
             range_height = screen_bottom - screen_top
@@ -1743,6 +1804,7 @@ class GameScene:
         hero_tile_y = int(hero.position.y)
         # Convert building position from pixels to tiles
         from shared.constants.game_constants import TILE_SIZE
+
         building_tile_x = int(pending_pos["x"] // TILE_SIZE)
         building_tile_y = int(pending_pos["y"] // TILE_SIZE)
 
@@ -1767,7 +1829,9 @@ class GameScene:
             )
             print(f"🔍 Min distance found: {min_distance_found:.2f}")
             print(f"📦 Sending build command: {self.pending_build}")
-            print(f"[CLIENT DEBUG] 🚀 Sending auto-build: {self.pending_build['building_type']} at pixel coords ({self.pending_build['position']['x']}, {self.pending_build['position']['y']})")
+            print(
+                f"[CLIENT DEBUG] 🚀 Sending auto-build: {self.pending_build['building_type']} at pixel coords ({self.pending_build['position']['x']}, {self.pending_build['position']['y']})"
+            )
             # Send the build command
             asyncio.create_task(
                 self.network_manager.send_game_action(self.pending_build)
@@ -1779,8 +1843,12 @@ class GameScene:
             self.building_menu.clear_selection()
             print("✅ Auto-build command sent and states cleared")
         else:
-            print(f"❌ Hero NOT adjacent! Distance: {min_distance_found:.2f} (need <= 1.8)")
-            print(f"📍 Hero at ({hero_tile_x}, {hero_tile_y}), Building at ({building_tile_x}, {building_tile_y}) size {size}")
+            print(
+                f"❌ Hero NOT adjacent! Distance: {min_distance_found:.2f} (need <= 1.8)"
+            )
+            print(
+                f"📍 Hero at ({hero_tile_x}, {hero_tile_y}), Building at ({building_tile_x}, {building_tile_y}) size {size}"
+            )
 
     def get_next_scene(self):
         if self.next_scene:

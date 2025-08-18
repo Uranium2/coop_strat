@@ -1,7 +1,7 @@
 import asyncio
+import glob
 import logging
 import os
-import glob
 
 import pygame
 
@@ -43,7 +43,7 @@ class MenuScene:
             "ARCHER": pygame.Rect(540, 200, 100, 50),
             "MAGE": pygame.Rect(660, 200, 100, 50),
         }
-        
+
         # Map selection buttons (will be positioned dynamically based on available maps)
         self.map_buttons = {}
 
@@ -67,7 +67,7 @@ class MenuScene:
             if not os.path.exists(maps_dir):
                 logger.warning(f"Maps directory not found: {maps_dir}")
                 return []
-            
+
             map_files = glob.glob(os.path.join(maps_dir, "*.json"))
             map_names = [os.path.basename(f) for f in map_files]
             logger.info(f"Discovered maps: {map_names}")
@@ -192,9 +192,13 @@ class MenuScene:
                     logger.info(f"Map {map_name} selected")
                     self.selected_map = map_name
 
-            start_button = pygame.Rect(400, 450, 200, 50)  # Moved down to make room for map selection
+            start_button = pygame.Rect(
+                400, 450, 200, 50
+            )  # Moved down to make room for map selection
             if start_button.collidepoint(pos):
-                logger.info(f"Start game button clicked with map: {self.selected_map or 'auto-generated'}")
+                logger.info(
+                    f"Start game button clicked with map: {self.selected_map or 'auto-generated'}"
+                )
                 asyncio.create_task(self.network_manager.start_game(self.selected_map))
 
     async def _connect_to_server(self):
@@ -418,10 +422,10 @@ class MenuScene:
         # Map selection section
         map_text = self.small_font.render("Select Map:", True, COLORS["WHITE"])
         screen.blit(map_text, (300, 270))
-        
+
         # Update map buttons dynamically
         self.map_buttons.clear()
-        
+
         # Auto-generated map option (always first)
         auto_rect = pygame.Rect(300, 300, 180, 40)
         self.map_buttons[None] = auto_rect  # None key for auto-generated
@@ -431,23 +435,23 @@ class MenuScene:
         auto_text = self.small_font.render("Auto-Generated", True, COLORS["WHITE"])
         auto_text_rect = auto_text.get_rect(center=auto_rect.center)
         screen.blit(auto_text, auto_text_rect)
-        
+
         # Custom map options
         for i, map_name in enumerate(self.available_maps):
             x_offset = (i + 1) % 3 * 200  # 3 maps per row
             y_offset = (i + 1) // 3 * 50  # New row every 3 maps
             map_rect = pygame.Rect(300 + x_offset, 350 + y_offset, 180, 40)
             self.map_buttons[map_name] = map_rect
-            
+
             color = COLORS["GREEN"] if self.selected_map == map_name else COLORS["GRAY"]
             pygame.draw.rect(screen, color, map_rect)
             pygame.draw.rect(screen, COLORS["WHITE"], map_rect, 2)
-            
+
             # Display shortened name if too long
-            display_name = map_name.replace('.json', '')
+            display_name = map_name.replace(".json", "")
             if len(display_name) > 15:
                 display_name = display_name[:12] + "..."
-            
+
             map_text_surf = self.small_font.render(display_name, True, COLORS["WHITE"])
             map_text_rect = map_text_surf.get_rect(center=map_rect.center)
             screen.blit(map_text_surf, map_text_rect)
